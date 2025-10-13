@@ -9,6 +9,7 @@
 //! - Event ID validation (SHA-256 verification)
 //! - Schnorr signature verification
 //! - Length-delimited protobuf I/O for streaming
+//! - SQLite index for event deduplication and fast lookups
 //! - Fluent builder pattern for constructing events
 //! - Serde support for direct JSON serialization
 //! - `Display` trait for human-readable output
@@ -77,6 +78,7 @@ pub mod builder;
 pub mod conversion;
 pub mod display;
 pub mod error;
+pub mod index;
 pub mod iter;
 pub mod serde_support;
 pub mod storage;
@@ -86,7 +88,8 @@ pub mod validation;
 pub use builder::ProtoEventBuilder;
 pub use conversion::{json_to_proto, proto_to_json};
 pub use error::{Error, Result};
-pub use storage::{read_events_delimited, write_event_delimited};
+pub use index::{EventIndex, EventRecord, IndexStats};
+pub use storage::{read_events_delimited, write_event_delimited, write_events_delimited};
 pub use validation::validate_event;
 
 #[cfg(test)]

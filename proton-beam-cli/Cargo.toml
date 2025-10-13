@@ -40,3 +40,7 @@ tempfile = { workspace = true }
 assert_cmd = "2.0"
 predicates = "3.0"
 
+[[bench]]
+name = "pipeline_bench"
+harness = false
+

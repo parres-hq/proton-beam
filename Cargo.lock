@@ -1743,6 +1743,7 @@ dependencies = [
  "prost",
  "prost-build",
  "prost-types",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

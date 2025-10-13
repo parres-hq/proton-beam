@@ -12,6 +12,7 @@ Proton Beam is a highly experimental (and will eventually be a high-performance)
 - 🚀 **High Performance**: Process 100+ events/second with validated signatures
 - 🔒 **Full Validation**: Verify event IDs (SHA-256) and Schnorr signatures
 - 📦 **Efficient Storage**: ~10-25% smaller than minified JSON
+- 🗄️ **SQLite Index**: Fast event lookups and deduplication (~307K lookups/sec)
 - 🔄 **Real-time Processing**: Connect to multiple Nostr relays simultaneously
 - 🎯 **Smart Deduplication**: Events stored once across all relay sources
 - 🔍 **Advanced Filtering**: Filter by event kind, author, or tags
@@ -55,6 +56,18 @@ Specify output directory:
 proton-beam convert events.jsonl --output-dir ./pb_data
 ```
 
+Custom index location:
+
+```bash
+proton-beam convert events.jsonl --index-path ./my_index.db
+```
+
+Skip validation for faster processing:
+
+```bash
+proton-beam convert events.jsonl --no-validate
+```
+
 ### Daemon Usage
 
 Start with default configuration:
@@ -90,11 +103,34 @@ proton-beam/
 
 ## Documentation
 
-- **[Project Status](docs/STATUS.md)**: Current implementation status and progress
-- **[Project Plan](docs/PROJECT_PLAN.md)**: Complete architecture and implementation plan
+- **[Project Status & Plan](docs/PROJECT_STATUS.md)**: Current status, progress, and complete roadmap
+- **[Architecture](docs/ARCHITECTURE.md)**: System architecture and design decisions
 - **[Protobuf Schema](docs/PROTOBUF_SCHEMA.md)**: Detailed schema documentation
+- **[Developer Guide](docs/DEVELOPER_GUIDE.md)**: Development setup and workflows
+- **[Benchmarking Guide](docs/BENCHMARKING.md)**: Performance benchmarks and optimization tips
 - **[Documentation Index](docs/INDEX.md)**: Complete documentation navigation
 - **API Documentation**: Run `cargo doc --open`
+
+## Performance Benchmarks
+
+Proton Beam includes comprehensive benchmarks covering all critical paths. Run them with:
+
+```bash
+# Using just (recommended)
+just bench
+
+# Or using the shell script
+./scripts/run-benchmarks.sh --release
+```
+
+**Sample Results** (Apple M1 Pro):
+- JSON → Protobuf: ~195k events/sec
+- Protobuf → JSON: ~845k events/sec
+- Basic validation: ~7M validations/sec
+- Storage throughput: ~473 MB/sec write, ~810 MB/sec read
+- End-to-end pipeline: ~155k events/sec
+
+See [BENCHMARKS_README.md](BENCHMARKS_README.md) for detailed information.
 
 ## Configuration Example
 
@@ -143,18 +179,19 @@ use_index = true
 
 ## Development Status
 
-✅ **Phase 1 Complete**: Core library fully implemented and tested
+✅ **Phase 1 Complete**: Core library fully implemented and tested (62/62 tests passing)
 ✅ **Phase 1.5 Complete**: Enhanced API with builder, Display, Serde, FromIterator
-🚧 **Next Phase**: CLI Tool
+✅ **Phase 2 Complete**: CLI tool with progress bars, date-based storage (18/18 tests passing)
+🚧 **Next Phase**: SQLite Index & Deduplication
 
-See [STATUS.md](docs/STATUS.md) for detailed progress.
+See [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for detailed progress.
 
 ### Roadmap
 
 - [x] Phase 1: Core library & protobuf schema ✅
 - [x] Phase 1.5: Enhanced API features ✅
-- [ ] Phase 2: CLI tool ⏳
-- [ ] Phase 3: SQLite index & deduplication
+- [x] Phase 2: CLI tool ✅
+- [ ] Phase 3: SQLite index & deduplication ⏳
 - [ ] Phase 4: Relay daemon (core)
 - [ ] Phase 5: Relay discovery & advanced features
 - [ ] Phase 6: Testing, documentation & polish

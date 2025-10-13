@@ -32,7 +32,7 @@ impl InputReader {
             }
 
             let file = File::open(path).context(format!("Failed to open input file: {}", input))?;
-            let reader = BufReader::new(file);
+            let reader = BufReader::with_capacity(1024 * 1024, file); // 1MB buffer
             ReaderType::File(reader.lines())
         };
 

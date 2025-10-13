@@ -303,3 +303,141 @@ fn test_file_with_blank_lines() {
         .stdout(predicate::str::contains("Valid events:       2"))
         .stdout(predicate::str::contains("Skipped lines:      3")); // 3 because of empty lines at start/middle/end
 }
+
+#[test]
+fn test_index_creation() {
+    let temp_dir = TempDir::new().unwrap();
+    let sample_path = sample_events_path();
+
+    let mut cmd = Command::cargo_bin("proton-beam").unwrap();
+    cmd.arg("convert")
+        .arg(&sample_path)
+        .arg("--output-dir")
+        .arg(temp_dir.path())
+        .arg("--no-progress");
+
+    cmd.assert().success();
+
+    // Check that index was created
+    let index_file = temp_dir.path().join(".index.db");
+    assert!(index_file.exists(), "Index database was not created");
+}
+
+#[test]
+fn test_deduplication() {
+    let temp_dir = TempDir::new().unwrap();
+
+    // Create a test file with duplicate events
+    let test_file = temp_dir.path().join("test.jsonl");
+    let event_json = r#"{"id": "859501854a0e2b63383db18f187f8d2a7f988651793687215a6549f2da380528", "sig": "d693cca65af7df2619be909042f5b11a4e4bbe32932d5aa6ac22eb20c6e0551ab6e34690eddcbc76d893d64e60b6bf1c9838b02dea0eb1c05b38b28a700061cf", "kind": 7, "tags": [["e", "43f5606a0ceff70c40800855ffc24f2690d04c99d28a76cbdfdfe0c16737d7b4"], ["p", "f9c8838736f5a0b611ed2c458a8ae7a480802e4ec38e52e96483986ca44ce612"]], "pubkey": "7776c32d4b1d1e8bf2a96babeb43ad9ade157bd363d89b87fb63e6f145558888", "content": "🤙", "created_at": 1758991030}"#;
+
+    fs::write(
+        &test_file,
+        format!("{}\n{}\n{}\n", event_json, event_json, event_json), // Same event 3 times
+    )
+    .unwrap();
+
+    let output_dir = temp_dir.path().join("output");
+
+    // First conversion
+    let mut cmd = Command::cargo_bin("proton-beam").unwrap();
+    cmd.arg("convert")
+        .arg(&test_file)
+        .arg("--output-dir")
+        .arg(&output_dir)
+        .arg("--no-progress")
+        .arg("--no-validate");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Valid events:       1"))
+        .stdout(predicate::str::contains("Duplicate events:   2"));
+
+    // Second conversion - all should be duplicates
+    let mut cmd2 = Command::cargo_bin("proton-beam").unwrap();
+    cmd2.arg("convert")
+        .arg(&test_file)
+        .arg("--output-dir")
+        .arg(&output_dir)
+        .arg("--no-progress")
+        .arg("--no-validate");
+
+    cmd2.assert()
+        .success()
+        .stdout(predicate::str::contains("Valid events:       0"))
+        .stdout(predicate::str::contains("Duplicate events:   3"));
+}
+
+#[test]
+fn test_custom_index_path() {
+    let temp_dir = TempDir::new().unwrap();
+    let sample_path = sample_events_path();
+    let custom_index = temp_dir.path().join("custom_index.db");
+
+    let mut cmd = Command::cargo_bin("proton-beam").unwrap();
+    cmd.arg("convert")
+        .arg(&sample_path)
+        .arg("--output-dir")
+        .arg(temp_dir.path())
+        .arg("--index-path")
+        .arg(&custom_index)
+        .arg("--no-progress");
+
+    cmd.assert().success();
+
+    // Check that custom index was created
+    assert!(
+        custom_index.exists(),
+        "Custom index database was not created"
+    );
+
+    // Default index should not exist
+    let default_index = temp_dir.path().join(".index.db");
+    assert!(
+        !default_index.exists(),
+        "Default index was created when custom path was specified"
+    );
+}
+
+#[test]
+fn test_deduplication_across_batches() {
+    let temp_dir = TempDir::new().unwrap();
+
+    // Create a test file with events
+    let test_file = temp_dir.path().join("test.jsonl");
+    let event1 = r#"{"id": "859501854a0e2b63383db18f187f8d2a7f988651793687215a6549f2da380528", "sig": "d693cca65af7df2619be909042f5b11a4e4bbe32932d5aa6ac22eb20c6e0551ab6e34690eddcbc76d893d64e60b6bf1c9838b02dea0eb1c05b38b28a700061cf", "kind": 7, "tags": [["e", "43f5606a0ceff70c40800855ffc24f2690d04c99d28a76cbdfdfe0c16737d7b4"], ["p", "f9c8838736f5a0b611ed2c458a8ae7a480802e4ec38e52e96483986ca44ce612"]], "pubkey": "7776c32d4b1d1e8bf2a96babeb43ad9ade157bd363d89b87fb63e6f145558888", "content": "🤙", "created_at": 1758991030}"#;
+    let event2 = r#"{"id": "56aa4f81df193b084e2cb85fa1552e94f16246c6eba6db010891729b02f436b7", "sig": "8ffd678e0fb8ce574d132fb98f3c3af8ad9c3ff00f2eab64babc05e5a981c81da5a6acb699c80ac85474155f6df091785f745c56c2d19e743d97ae527e750390", "kind": 1, "tags": [["e", "99f4f259c390d31451d4ebdbdd50f6731abb17d2e3749b1d47b3bc2584937620", "", "root"], ["p", "99cefa645b00817373239aebb96d2d1990244994e5e565566c82c04b8dc65b54"]], "pubkey": "01d0bbf9537ef1fd0ddf815f41c1896738f6a3a0f600f51c782b7d8891130d4c", "content": "Test content", "created_at": 1758991030}"#;
+
+    fs::write(&test_file, format!("{}\n{}\n", event1, event2)).unwrap();
+
+    let output_dir = temp_dir.path().join("output");
+
+    // First conversion with small batch size
+    let mut cmd = Command::cargo_bin("proton-beam").unwrap();
+    cmd.arg("convert")
+        .arg(&test_file)
+        .arg("--output-dir")
+        .arg(&output_dir)
+        .arg("--batch-size")
+        .arg("1") // Very small batch to test across batches
+        .arg("--no-progress")
+        .arg("--no-validate");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Valid events:       2"));
+
+    // Second conversion - both should be duplicates
+    let mut cmd2 = Command::cargo_bin("proton-beam").unwrap();
+    cmd2.arg("convert")
+        .arg(&test_file)
+        .arg("--output-dir")
+        .arg(&output_dir)
+        .arg("--no-progress")
+        .arg("--no-validate");
+
+    cmd2.assert()
+        .success()
+        .stdout(predicate::str::contains("Valid events:       0"))
+        .stdout(predicate::str::contains("Duplicate events:   2"));
+}

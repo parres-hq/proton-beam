@@ -11,19 +11,16 @@ Welcome to the Proton Beam documentation! This index will help you find the info
 
 ### For Developers
 
-- **[Project Status](STATUS.md)** ⭐ *Start here for current progress*
-  - Implementation status
-  - Phase completion summary
+- **[Project Status & Plan](PROJECT_STATUS.md)** ⭐ *Start here - Complete overview*
+  - Current status (42% complete)
+  - Completed phases (0, 1, 1.5, 2) ✅
+  - Remaining phases (3, 4, 5, 6) with detailed tasks
+  - Implementation roadmap
   - API overview
-  - Next steps
-  - Quality metrics
+  - Performance metrics
+  - Next steps and milestones
 
-- **[Project Plan](PROJECT_PLAN.md)** - Complete project overview
-  - Executive summary
-  - Architecture overview
-  - Implementation phases
-  - Component specifications
-  - Success metrics
+  **Note:** This document supersedes the previous PROJECT_PLAN.md, STATUS.md, and SUMMARY.md files.
 
 - **[Architecture](ARCHITECTURE.md)** - System architecture and design
   - System diagrams
@@ -44,6 +41,13 @@ Welcome to the Proton Beam documentation! This index will help you find the info
   - Common tasks
   - Release process
 
+- **[Benchmarking Guide](BENCHMARKING.md)** - Performance benchmarks and optimization
+  - Running benchmarks
+  - Performance targets
+  - Optimization tips
+  - CI/CD integration
+  - Regression detection
+
 ## 🚀 Quick Navigation
 
 ### I want to...
@@ -56,32 +60,34 @@ Welcome to the Proton Beam documentation! This index will help you find the info
 #### Understand the Project
 - **Learn about the architecture** → [Architecture Document](ARCHITECTURE.md)
 - **Understand the data format** → [Protobuf Schema](PROTOBUF_SCHEMA.md)
-- **See the full plan** → [Project Plan](PROJECT_PLAN.md)
+- **See the full plan and current status** → [Project Status & Plan](PROJECT_STATUS.md)
 
 #### Develop & Contribute
 - **Set up development environment** → [Developer Guide - Setup](DEVELOPER_GUIDE.md#setup)
 - **Write tests** → [Developer Guide - Testing](DEVELOPER_GUIDE.md#testing)
+- **Run benchmarks** → [Benchmarking Guide](BENCHMARKING.md#running-benchmarks)
 - **Add new features** → [Developer Guide - Common Tasks](DEVELOPER_GUIDE.md#common-tasks)
 - **Submit changes** → [Contributing Guidelines](CONTRIBUTING.md)
 
 ## 📖 Document Summaries
 
-### [PROJECT_PLAN.md](PROJECT_PLAN.md)
-**Purpose:** Complete project specification and implementation roadmap
+### [PROJECT_STATUS.md](PROJECT_STATUS.md) ⭐
+**Purpose:** Complete project status, plan, and roadmap (PRIMARY DOCUMENT)
 
 **Contents:**
-- Project goals and requirements
-- Workspace structure
-- Component specifications (CLI, daemon, core)
-- Protobuf schema design
-- Validation strategy
-- Performance targets
-- Implementation phases (6 phases)
-- Testing strategy
-- Dependencies and risks
-- Success metrics
+- Executive summary
+- Overall progress (42% complete, 92/92 tests passing)
+- Completed phases with detailed accomplishments
+- Remaining phases with task breakdowns
+- Project goals and success criteria
+- Architecture overview
+- API documentation and usage examples
+- Performance metrics (measured)
+- Technology stack
+- Key design decisions
+- Next steps and milestones
 
-**Read this if:** You want to understand the complete scope and plan for Proton Beam.
+**Read this if:** You want the complete picture - current status, what's done, what's next, and the full roadmap.
 
 ---
 
@@ -174,7 +180,7 @@ Welcome to the Proton Beam documentation! This index will help you find the info
 ```
 README.md (Entry Point)
     │
-    ├─► PROJECT_PLAN.md (Complete specification)
+    ├─► PROJECT_STATUS.md ⭐ (Status, plan & roadmap - START HERE)
     │       │
     │       ├─► ARCHITECTURE.md (System design)
     │       │       │
@@ -186,22 +192,30 @@ README.md (Entry Point)
             ├─► config.toml (Configuration example)
             ├─► sample_events.jsonl (Test data)
             └─► README.md (Examples documentation)
+
+Archived (historical reference):
+    ├─► PROJECT_PLAN.md (original plan)
+    ├─► STATUS.md (original status tracking)
+    └─► SUMMARY.md (planning phase summary)
 ```
 
 ## 📊 Project Status
 
-**Current Phase:** Phase 1.5 Complete ✅
+**Current Phase:** Phase 2 Complete ✅
+**Next Phase:** Phase 3 - SQLite Index & Deduplication
 
 **Implementation Phases:**
-1. ✅ Core Library & Protobuf Schema (Complete)
+1. ✅ Core Library & Protobuf Schema (Complete - 62/62 tests)
 2. ✅ Enhanced API Features (Complete)
-3. ⏳ CLI Tool (Next)
-4. ⏳ SQLite Index & Deduplication
+3. ✅ CLI Tool (Complete - 18/18 tests)
+4. ⏳ SQLite Index & Deduplication (Next)
 5. ⏳ Relay Daemon (Core)
 6. ⏳ Relay Discovery & Advanced Features
 7. ⏳ Testing, Documentation & Polish
 
-See [Project Status](STATUS.md) for detailed progress.
+**Overall Progress:** 42% (4 of 8 phases complete)
+
+See [Project Status & Plan](PROJECT_STATUS.md) for detailed progress and roadmap.
 
 ## 🔑 Key Concepts
 

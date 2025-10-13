@@ -70,6 +70,11 @@ impl StorageManager {
         Ok(datetime.format("%Y_%m_%d").to_string())
     }
 
+    /// Public method to get the date string for an event (used for indexing)
+    pub fn get_date_string_for_event(&self, event: &ProtoEvent) -> Result<String> {
+        self.get_date_string(event)
+    }
+
     /// Flush a specific buffer to disk
     fn flush_buffer(&mut self, date_str: &str) -> Result<()> {
         let buffer = match self.buffers.remove(date_str) {

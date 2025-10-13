@@ -34,12 +34,16 @@ enum Commands {
         #[arg(short, long, default_value = "./pb_data")]
         output_dir: PathBuf,
 
+        /// Path to SQLite index database (defaults to OUTPUT_DIR/.index.db)
+        #[arg(long)]
+        index_path: Option<PathBuf>,
+
         /// Skip event validation (faster but dangerous)
         #[arg(long)]
         no_validate: bool,
 
         /// Batch size for writing events
-        #[arg(short, long, default_value = "500")]
+        #[arg(short, long, default_value = "1000")]
         batch_size: usize,
 
         /// Show detailed progress information
@@ -58,6 +62,7 @@ struct ConversionStats {
     valid_events: u64,
     invalid_events: u64,
     skipped_lines: u64,
+    duplicates: u64,
 }
 
 impl ConversionStats {
@@ -67,6 +72,7 @@ impl ConversionStats {
             valid_events: 0,
             invalid_events: 0,
             skipped_lines: 0,
+            duplicates: 0,
         }
     }
 
@@ -75,6 +81,9 @@ impl ConversionStats {
         println!("  Total lines processed: {}", self.total_lines);
         println!("  ✅ Valid events:       {}", self.valid_events);
         println!("  ❌ Invalid events:     {}", self.invalid_events);
+        if self.duplicates > 0 {
+            println!("  🔄 Duplicate events:   {}", self.duplicates);
+        }
         if self.skipped_lines > 0 {
             println!("  ⏭️  Skipped lines:      {}", self.skipped_lines);
         }
@@ -95,6 +104,7 @@ fn main() -> Result<()> {
         Commands::Convert {
             input,
             output_dir,
+            index_path,
             no_validate,
             batch_size,
             verbose,
@@ -103,9 +113,13 @@ fn main() -> Result<()> {
             // Initialize logging
             init_logging(verbose);
 
+            // Determine index path
+            let index_path = index_path.unwrap_or_else(|| output_dir.join(".index.db"));
+
             info!("Starting Proton Beam CLI");
             info!("Input: {}", input);
             info!("Output directory: {}", output_dir.display());
+            info!("Index database: {}", index_path.display());
             info!(
                 "Validation: {}",
                 if no_validate { "disabled" } else { "enabled" }
@@ -113,7 +127,7 @@ fn main() -> Result<()> {
             info!("Batch size: {}", batch_size);
 
             // Run conversion
-            convert_events(&input, &output_dir, !no_validate, batch_size, !no_progress)?;
+            convert_events(&input, &output_dir, &index_path, !no_validate, batch_size, !no_progress)?;
         }
     }
 
@@ -139,12 +153,17 @@ fn init_logging(verbose: bool) {
 fn convert_events(
     input: &str,
     output_dir: &Path,
+    index_path: &Path,
     validate: bool,
     batch_size: usize,
     show_progress: bool,
 ) -> Result<()> {
     // Create output directory if it doesn't exist
     std::fs::create_dir_all(output_dir).context("Failed to create output directory")?;
+
+    // Initialize event index
+    use proton_beam_core::EventIndex;
+    let mut index = EventIndex::new(index_path).context("Failed to open event index")?;
 
     // Initialize storage manager
     let mut storage = StorageManager::new(output_dir, batch_size)?;
@@ -169,6 +188,9 @@ fn convert_events(
 
     let mut stats = ConversionStats::new();
 
+    // Buffer for batch index insertions
+    let mut index_buffer: Vec<(ProtoEvent, String)> = Vec::with_capacity(batch_size);
+
     // Process each line
     for (line_num, line_result) in reader.enumerate() {
         stats.total_lines += 1;
@@ -191,8 +213,8 @@ fn convert_events(
         // Update progress
         if let Some(ref pb) = progress {
             pb.set_message(format!(
-                "Processed: {} | Valid: {} | Errors: {}",
-                stats.total_lines, stats.valid_events, stats.invalid_events
+                "Processed: {} | Valid: {} | Errors: {} | Dupes: {}",
+                stats.total_lines, stats.valid_events, stats.invalid_events, stats.duplicates
             ));
         }
 
@@ -207,6 +229,16 @@ fn convert_events(
             }
         };
 
+        // Check for duplicates (check both index and buffer)
+        let in_index = index.contains(&event.id).context("Failed to check index")?;
+        let in_buffer = index_buffer.iter().any(|(e, _)| e.id == event.id);
+
+        if in_index || in_buffer {
+            info!("Skipping duplicate event: {} (line {})", event.id, line_num + 1);
+            stats.duplicates += 1;
+            continue;
+        }
+
         // Validate if requested
         if validate && let Err(e) = validate_event(&event) {
             warn!("Failed to validate event on line {}: {}", line_num + 1, e);
@@ -219,11 +251,26 @@ fn convert_events(
             continue;
         }
 
+        // Get the date string for file path
+        let date_str = storage.get_date_string_for_event(&event)?;
+        let file_name = format!("{}.pb", date_str);
+
         // Store the event
-        match storage.store_event(event) {
+        match storage.store_event(event.clone()) {
             Ok(_) => {
+                // Buffer the event for batch index insertion
+                index_buffer.push((event, file_name));
                 stats.valid_events += 1;
                 debug!("Successfully stored event from line {}", line_num + 1);
+
+                // Flush index buffer when it reaches batch size
+                if index_buffer.len() >= batch_size {
+                    let batch_refs: Vec<_> = index_buffer.iter()
+                        .map(|(e, f)| (e, f.as_str()))
+                        .collect();
+                    index.insert_batch(&batch_refs).context("Failed to batch insert to index")?;
+                    index_buffer.clear();
+                }
             }
             Err(e) => {
                 error!("Failed to store event from line {}: {}", line_num + 1, e);
@@ -240,19 +287,28 @@ fn convert_events(
     // Flush any remaining events
     storage.flush()?;
 
+    // Flush any remaining index entries
+    if !index_buffer.is_empty() {
+        let batch_refs: Vec<_> = index_buffer.iter()
+            .map(|(e, f)| (e, f.as_str()))
+            .collect();
+        index.insert_batch(&batch_refs).context("Failed to flush final index batch")?;
+    }
+
     // Clean up progress bar
     if let Some(pb) = progress {
         pb.finish_with_message(format!(
-            "Complete! Processed: {} | Valid: {} | Errors: {}",
-            stats.total_lines, stats.valid_events, stats.invalid_events
+            "Complete! Processed: {} | Valid: {} | Errors: {} | Dupes: {}",
+            stats.total_lines, stats.valid_events, stats.invalid_events, stats.duplicates
         ));
     }
 
     info!("Conversion complete");
     stats.print_summary();
 
-    // Exit code: 0 if any events succeeded, 1 if all failed
-    if stats.valid_events == 0 && stats.total_lines > 0 {
+    // Exit code: 0 if any events succeeded or were duplicates, 1 if all failed
+    // Duplicates are not considered failures since they were successfully processed before
+    if stats.valid_events == 0 && stats.duplicates == 0 && stats.total_lines > 0 {
         std::process::exit(1);
     }
 
