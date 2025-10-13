@@ -5,7 +5,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Proton Beam is a high-performance Rust tool for converting [Nostr](https://nostr.com) events from JSON format to Protocol Buffers (protobuf). It provides both a CLI tool for batch processing and a daemon for real-time relay monitoring.
+Proton Beam is a highly experimental (and will eventually be a high-performance) Rust tool for converting [Nostr](https://nostr.com) events from JSON format to Protocol Buffers (protobuf). It provides both a CLI tool for batch processing and a daemon for real-time relay monitoring.
 
 ## Features
 
