@@ -146,12 +146,24 @@ Compares JSON vs Protobuf storage sizes.
 
 ---
 
-## Making Scripts Executable
+## Quick Start
+
+The scripts automatically find the `proton-beam` binary in your project's `target/` directory, so you don't need to install it globally. Just build and run:
+
+```bash
+# From project root
+cargo build --release -p proton-beam-cli
+
+# Run any example script
+./examples/scripts/basic_conversion.sh
+```
+
+### Making Scripts Executable
 
 Before running, make scripts executable:
 
 ```bash
-chmod +x scripts/*.sh
+chmod +x examples/scripts/*.sh
 ```
 
 ## Dependencies
@@ -301,14 +313,20 @@ chmod +x script_name.sh
 
 ### "Command not found: proton-beam"
 
-Install proton-beam:
+**This should not happen!** The scripts automatically detect the proton-beam binary from:
+1. System PATH (if installed with `cargo install`)
+2. `target/release/proton-beam` (release build)
+3. `target/debug/proton-beam` (debug build)
+
+If you still see this error, build the project:
 ```bash
-cargo install --path proton-beam-cli
+# From the project root
+cargo build --release -p proton-beam-cli
 ```
 
-Or add to PATH:
+Or install globally:
 ```bash
-export PATH="$PATH:/path/to/proton-beam/target/release"
+cargo install --path proton-beam-cli
 ```
 
 ### "nak: command not found"

@@ -10,9 +10,30 @@
 
 set -e
 
+# Find proton-beam binary
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if command -v proton-beam &> /dev/null; then
+  PROTON_BEAM="proton-beam"
+elif [ -f "$PROJECT_ROOT/target/release/proton-beam" ]; then
+  PROTON_BEAM="$PROJECT_ROOT/target/release/proton-beam"
+elif [ -f "$PROJECT_ROOT/target/debug/proton-beam" ]; then
+  PROTON_BEAM="$PROJECT_ROOT/target/debug/proton-beam"
+else
+  echo "❌ Error: proton-beam not found"
+  echo ""
+  echo "Please build the project first:"
+  echo "  cargo build --release -p proton-beam-cli"
+  echo ""
+  echo "Or install it:"
+  echo "  cargo install --path proton-beam-cli"
+  exit 1
+fi
+
 # Configuration
 INPUT_FILE="${1:-examples/sample_events.jsonl}"
-OUTPUT_DIR="./pb_data_fast"
+OUTPUT_DIR="./pb_data"
 
 echo "⚡ Fast conversion mode"
 echo "⚠️  Validation disabled - use only for trusted data!"
@@ -31,7 +52,7 @@ fi
 START_TIME=$(date +%s)
 
 # Run conversion with performance settings
-proton-beam convert "$INPUT_FILE" \
+"$PROTON_BEAM" convert "$INPUT_FILE" \
   --output-dir "$OUTPUT_DIR" \
   --no-validate \
   --batch-size 2000 \

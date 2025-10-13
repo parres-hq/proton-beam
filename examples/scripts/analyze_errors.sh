@@ -99,4 +99,5 @@ echo "To retry failed events without validation:"
 echo "  jq -r '.original_json' $ERRORS_FILE > failed_events.jsonl"
 echo "  proton-beam convert failed_events.jsonl --no-validate"
 echo ""
+echo "Note: This script is for analysis only and doesn't require proton-beam to be in PATH"
 

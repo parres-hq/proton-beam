@@ -6,6 +6,27 @@
 
 set -e  # Exit on error
 
+# Find proton-beam binary
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if command -v proton-beam &> /dev/null; then
+  PROTON_BEAM="proton-beam"
+elif [ -f "$PROJECT_ROOT/target/release/proton-beam" ]; then
+  PROTON_BEAM="$PROJECT_ROOT/target/release/proton-beam"
+elif [ -f "$PROJECT_ROOT/target/debug/proton-beam" ]; then
+  PROTON_BEAM="$PROJECT_ROOT/target/debug/proton-beam"
+else
+  echo "❌ Error: proton-beam not found"
+  echo ""
+  echo "Please build the project first:"
+  echo "  cargo build --release -p proton-beam-cli"
+  echo ""
+  echo "Or install it:"
+  echo "  cargo install --path proton-beam-cli"
+  exit 1
+fi
+
 # Configuration
 INPUT_FILE="examples/sample_events.jsonl"
 OUTPUT_DIR="./pb_data"
@@ -16,7 +37,7 @@ echo "Output: $OUTPUT_DIR"
 echo ""
 
 # Run conversion
-proton-beam convert "$INPUT_FILE" --output-dir "$OUTPUT_DIR"
+"$PROTON_BEAM" convert "$INPUT_FILE" --output-dir "$OUTPUT_DIR"
 
 echo ""
 echo "✅ Conversion complete!"

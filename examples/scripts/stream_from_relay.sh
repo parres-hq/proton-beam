@@ -8,6 +8,27 @@
 
 set -e
 
+# Find proton-beam binary
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if command -v proton-beam &> /dev/null; then
+  PROTON_BEAM="proton-beam"
+elif [ -f "$PROJECT_ROOT/target/release/proton-beam" ]; then
+  PROTON_BEAM="$PROJECT_ROOT/target/release/proton-beam"
+elif [ -f "$PROJECT_ROOT/target/debug/proton-beam" ]; then
+  PROTON_BEAM="$PROJECT_ROOT/target/debug/proton-beam"
+else
+  echo "❌ Error: proton-beam not found"
+  echo ""
+  echo "Please build the project first:"
+  echo "  cargo build --release -p proton-beam-cli"
+  echo ""
+  echo "Or install it:"
+  echo "  cargo install --path proton-beam-cli"
+  exit 1
+fi
+
 # Configuration
 RELAY="wss://relay.damus.io"
 OUTPUT_DIR="./relay_data"
@@ -35,7 +56,7 @@ mkdir -p "$OUTPUT_DIR"
 # Fetch and convert events
 echo "Fetching events..."
 nak req -k 1 --limit "$EVENT_LIMIT" "$RELAY" | \
-  proton-beam convert - --output-dir "$OUTPUT_DIR"
+  "$PROTON_BEAM" convert - --output-dir "$OUTPUT_DIR"
 
 echo ""
 echo "✅ Stream processing complete!"

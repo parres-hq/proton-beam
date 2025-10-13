@@ -6,6 +6,27 @@
 
 set -e
 
+# Find proton-beam binary
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if command -v proton-beam &> /dev/null; then
+  PROTON_BEAM="proton-beam"
+elif [ -f "$PROJECT_ROOT/target/release/proton-beam" ]; then
+  PROTON_BEAM="$PROJECT_ROOT/target/release/proton-beam"
+elif [ -f "$PROJECT_ROOT/target/debug/proton-beam" ]; then
+  PROTON_BEAM="$PROJECT_ROOT/target/debug/proton-beam"
+else
+  echo "❌ Error: proton-beam not found"
+  echo ""
+  echo "Please build the project first:"
+  echo "  cargo build --release -p proton-beam-cli"
+  echo ""
+  echo "Or install it:"
+  echo "  cargo install --path proton-beam-cli"
+  exit 1
+fi
+
 # Configuration
 BACKUP_ROOT="$HOME/nostr_backups"
 DATE=$(date +%Y-%m-%d)
@@ -45,7 +66,7 @@ echo ""
 
 # Convert to protobuf
 echo "Converting to protobuf..."
-proton-beam convert "$TEMP_FILE" \
+"$PROTON_BEAM" convert "$TEMP_FILE" \
   --output-dir "$OUTPUT_DIR" \
   --batch-size 1000
 

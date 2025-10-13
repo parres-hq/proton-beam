@@ -102,7 +102,19 @@ check_command() {
   fi
 }
 
-check_command "proton-beam" "proton-beam" "required"
+# Check for proton-beam (check PATH, release, or debug)
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+if command -v proton-beam &> /dev/null; then
+  echo -e "${GREEN}✓${NC} proton-beam installed (in PATH)"
+elif [ -f "$PROJECT_ROOT/target/release/proton-beam" ]; then
+  echo -e "${GREEN}✓${NC} proton-beam built (release mode)"
+elif [ -f "$PROJECT_ROOT/target/debug/proton-beam" ]; then
+  echo -e "${GREEN}✓${NC} proton-beam built (debug mode)"
+else
+  echo -e "${RED}✗${NC} proton-beam - NOT FOUND"
+  echo "  Build it with: cargo build --release -p proton-beam-cli"
+fi
+
 check_command "nak" "nak" "optional"
 check_command "jq" "jq" "optional"
 check_command "bc" "bc" "optional"
@@ -112,15 +124,6 @@ echo "════════════════════════�
 
 if [ $TESTS_FAILED -eq 0 ]; then
   echo -e "${GREEN}✅ All tests passed!${NC}"
-
-  if ! command -v proton-beam &> /dev/null; then
-    echo ""
-    echo "Note: proton-beam is not installed."
-    echo "Build it with:"
-    echo "  cargo build --release -p proton-beam-cli"
-    echo "  export PATH=\"\$PATH:$(cd ../.. && pwd)/target/release\""
-  fi
-
   exit 0
 else
   echo -e "${RED}❌ Some tests failed${NC}"
