@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+Proton Beam is a CLI tool that converts JSON (from `.jsonl` files, raw JSON objects, or streams of JSON data) into protobuf.

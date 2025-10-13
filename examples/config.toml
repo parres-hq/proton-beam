@@ -1,0 +1,96 @@
+# Proton Beam Daemon Configuration
+# This is an example configuration file for proton-beam-daemon
+
+[daemon]
+# Directory where protobuf event files will be stored
+output_dir = "./nostr_events"
+
+# Number of events to batch before writing to disk
+# Higher values = better write performance, but more memory usage
+# Lower values = more frequent writes, lower memory usage
+batch_size = 500
+
+# Logging level: "trace", "debug", "info", "warn", "error"
+log_level = "info"
+
+[relays]
+# Initial list of relay URLs to connect to
+urls = [
+    "wss://relay.damus.io",
+    "wss://nos.lol",
+    "wss://relay.primal.net",
+    "wss://relay.nostr.band",
+    "wss://relay.snort.social",
+]
+
+# Automatically discover and connect to new relays from event tags
+# Looks at 'r', 'relay' tags and relay hints in 'e', 'p', 'a' tags
+auto_discover = true
+
+# Maximum number of concurrent relay connections
+# Set to 0 for unlimited (not recommended)
+max_relays = 50
+
+[filters]
+# Filter events by kind (empty array = accept all kinds)
+# Common kinds:
+#   0 = Metadata (user profiles)
+#   1 = Text Note (short posts)
+#   3 = Contacts (follow lists)
+#   5 = Deletion requests
+#   6 = Reposts
+#   7 = Reactions
+#   10002 = Relay list metadata
+#   30023 = Long-form content
+# See NIP-01 for complete list: https://github.com/nostr-protocol/nips/blob/master/01.md
+kinds = []
+
+# Filter events by author pubkey (empty array = accept all authors)
+# Pubkeys should be 32-byte hex-encoded strings
+# Example: ["79dff8f82963424e0bb02708a22e44b4980893e3a4be0fa3cb60a43b946764e3"]
+authors = []
+
+# Filter events by tags (optional)
+# Format: tags.<tag_name> = ["value1", "value2"]
+# Examples:
+#   tags.p = ["pubkey1", "pubkey2"]  # Only events tagging these pubkeys
+#   tags.t = ["bitcoin", "nostr"]     # Only events with these hashtags
+# [filters.tags]
+# p = []
+# t = []
+
+[historical]
+# Request historical events from relays on startup
+enabled = false
+
+# Unix timestamp - only request events after this time
+# 0 = request all historical events (may be slow/expensive)
+# Use a recent timestamp to limit initial sync
+since_timestamp = 0
+
+[storage]
+# Deduplicate events by ID across all relays
+# Recommended: true (prevents storing same event multiple times)
+deduplicate = true
+
+# Use SQLite index to track stored events
+# Enables fast deduplication and future query capabilities
+# Slightly increases storage requirements (~1-2% of event data)
+use_index = true
+
+# Example: Filter only text notes and metadata
+# [filters]
+# kinds = [0, 1]
+
+# Example: Only store events from specific authors
+# [filters]
+# authors = [
+#     "79dff8f82963424e0bb02708a22e44b4980893e3a4be0fa3cb60a43b946764e3",
+#     "f7234bd4c1394dda46d09f35bd384dd30cc552ad5541990f98844fb06676e9ca",
+# ]
+
+# Example: Request last 7 days of events on startup
+# [historical]
+# enabled = true
+# since_timestamp = 1696500000  # Update to current timestamp - 7 days
+

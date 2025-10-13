@@ -1,0 +1,58 @@
+[workspace]
+resolver = "2"
+members = [
+    "proton-beam-core",
+    "proton-beam-cli",
+    "proton-beam-daemon",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90.0"
+license = "MIT"
+authors = ["Proton Beam Contributors"]
+repository = "https://github.com/parres-hq/proton-beam"
+homepage = "https://github.com/parres-hq/proton-beam"
+
+[workspace.dependencies]
+# Protobuf
+prost = "0.12"
+prost-types = "0.12"
+
+# Nostr
+nostr-sdk = "0.33"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+indicatif = "0.17"
+
+# Configuration
+toml = "0.8"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Date/Time
+chrono = "0.4"
+
+# Testing
+tempfile = "3.8"
+
+[workspace.dependencies.prost-build]
+version = "0.12"
