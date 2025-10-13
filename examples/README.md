@@ -2,6 +2,13 @@
 
 This directory contains example files for testing and understanding Proton Beam.
 
+## Quick Links
+
+- 📖 **[CLI Guide](CLI_README.md)** - Complete guide to using the CLI tool
+- 🔧 **[Example Scripts](scripts/)** - Ready-to-run shell scripts for common tasks
+- 📝 **[Sample Events](sample_events.jsonl)** - Test data for conversion
+- ⚙️ **[Config Template](config.toml)** - Daemon configuration example
+
 ## Files
 
 ### API Showcase Example
@@ -244,6 +251,38 @@ cp examples/config.toml my-config.toml
 # Edit my-config.toml
 proton-beam-daemon start --config my-config.toml
 ```
+
+---
+
+## CLI Guide
+
+**[CLI_README.md](CLI_README.md)** - Complete guide to the CLI tool including:
+
+- Quick start & installation
+- Basic usage examples
+- Command reference & options
+- Example scripts documentation
+- Common workflows (backups, streaming, filtering)
+- Integration examples (nak, jq, Docker, systemd)
+- Troubleshooting & best practices
+
+### Example Scripts
+
+Ready-to-run scripts in the `scripts/` directory:
+
+```bash
+# Make scripts executable (first time only)
+chmod +x scripts/*.sh
+
+# Try them out
+./scripts/basic_conversion.sh
+./scripts/compare_sizes.sh
+./scripts/analyze_errors.sh
+```
+
+See **[CLI_README.md](CLI_README.md#example-scripts)** and **[scripts/README.md](scripts/README.md)** for details.
+
+---
 
 ## Future Examples
 
