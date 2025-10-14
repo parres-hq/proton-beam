@@ -46,17 +46,51 @@ impl TryFrom<&str> for ProtoEvent {
     type Error = crate::error::Error;
 
     fn try_from(json: &str) -> Result<Self> {
-        // First, pre-validate the kind field before passing to nostr-sdk
+        // Parse JSON to serde_json::Value first for validation
+        let value: serde_json::Value = serde_json::from_str(json)
+            .map_err(|e| crate::error::Error::Conversion(format!("Invalid JSON: {}", e)))?;
+
+        // Pre-validate the kind field before passing to nostr-sdk
         // This prevents nostr-sdk from silently truncating invalid kind values
-        if let Some(kind) = serde_json::from_str::<serde_json::Value>(json)
-            .ok()
-            .and_then(|v| v.get("kind").and_then(|k| k.as_i64()))
+        if let Some(kind) = value
+            .get("kind")
+            .and_then(|k| k.as_i64())
             .filter(|k| !(0..=65535).contains(k))
         {
             return Err(crate::error::Error::Conversion(format!(
                 "Event kind {} is out of valid range (0-65535). Nostr event kinds must fit in a u16.",
                 kind
             )));
+        }
+
+        // Validate tags: check that all tag values are strings
+        if let Some(tags) = value.get("tags").and_then(|t| t.as_array()) {
+            for (tag_idx, tag) in tags.iter().enumerate() {
+                if let Some(tag_array) = tag.as_array() {
+                    for (elem_idx, element) in tag_array.iter().enumerate() {
+                        // Check if element is not a string
+                        if !element.is_string() {
+                            let type_name = if element.is_number() {
+                                "number"
+                            } else if element.is_boolean() {
+                                "boolean"
+                            } else if element.is_null() {
+                                "null"
+                            } else if element.is_object() {
+                                "object"
+                            } else if element.is_array() {
+                                "array"
+                            } else {
+                                "unknown"
+                            };
+                            return Err(crate::error::Error::Conversion(format!(
+                                "Invalid tag value: tags[{}][{}] is {}, expected string. All Nostr tag values must be strings.",
+                                tag_idx, elem_idx, type_name
+                            )));
+                        }
+                    }
+                }
+            }
         }
 
         // Parse JSON using nostr-sdk for proper validation
@@ -66,30 +100,10 @@ impl TryFrom<&str> for ProtoEvent {
                 let msg = e.to_string();
 
                 // Try to identify which field caused the issue
-                let hint = if msg.contains("expected a string") && msg.contains("line") && msg.contains("column") {
-                    // Extract position info to give better context
-                    msg.find("column")
-                        .and_then(|col_idx| {
-                            let col_part = &msg[col_idx..];
-                            col_part.split_whitespace().nth(1)
-                        })
-                        .and_then(|num_str| num_str.parse::<usize>().ok())
-                        .map(|col| {
-                            if col < 100 {
-                                " (hint: check that id, pubkey, and sig are hex strings)"
-                            } else {
-                                " (hint: all tag values must be strings, not numbers)"
-                            }
-                        })
-                        .unwrap_or(" (hint: ensure id, pubkey, sig are hex strings and all tag values are strings)")
-                } else if msg.contains("expected a string") && msg.contains("tags") {
-                    " (hint: all tag values must be strings - check for numeric values in tag arrays)"
-                } else if msg.contains("expected a string") {
+                let hint = if msg.contains("expected a string") {
                     " (hint: ensure id, pubkey, sig are hex strings and all tag values are strings)"
                 } else if msg.contains("missing field") {
                     " (required Nostr event fields: id, pubkey, created_at, kind, tags, content, sig)"
-                } else if msg.contains("invalid type") && msg.contains("tags") {
-                    " (hint: tags must be an array of string arrays, all values must be strings)"
                 } else {
                     ""
                 };

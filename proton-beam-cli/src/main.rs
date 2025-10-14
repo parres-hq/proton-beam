@@ -147,6 +147,7 @@ fn main() -> Result<()> {
                     .unwrap_or(1)
             });
 
+            // Log to file
             info!("Starting Proton Beam CLI");
             info!("Input: {}", input.display());
             info!("Output directory: {}", output_dir.display());
@@ -165,6 +166,14 @@ fn main() -> Result<()> {
                     "disabled"
                 }
             );
+
+            // Print clean startup message to stdout
+            if !no_progress {
+                println!("🚀 Proton Beam - Converting Nostr events to Protobuf");
+                println!("   Input: {}", input.display());
+                println!("   Threads: {}", num_threads);
+                println!();
+            }
 
             // Run conversion
             if num_threads > 1 {
@@ -197,13 +206,7 @@ fn main() -> Result<()> {
 
 fn init_logging(verbose: bool, output_dir: &Path) {
     use std::fs::OpenOptions;
-    use tracing_subscriber::{EnvFilter, filter::LevelFilter, fmt, prelude::*};
-
-    let filter = if verbose {
-        LevelFilter::DEBUG
-    } else {
-        LevelFilter::INFO
-    };
+    use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
     // Create log file in output directory
     let log_path = output_dir.join("proton-beam.log");
@@ -213,7 +216,14 @@ fn init_logging(verbose: bool, output_dir: &Path) {
         .open(&log_path)
         .expect("Failed to open log file");
 
-    // Create a compact formatter for the log file (only errors and warnings)
+    // Determine log level for file
+    let file_filter = if verbose {
+        LevelFilter::DEBUG
+    } else {
+        LevelFilter::INFO
+    };
+
+    // Create a formatter for the log file (all logs go here)
     let file_layer = fmt::layer()
         .with_writer(std::sync::Arc::new(log_file))
         .with_ansi(false)
@@ -223,18 +233,11 @@ fn init_logging(verbose: bool, output_dir: &Path) {
         .with_line_number(false)
         .with_file(false)
         .compact()
-        .with_filter(EnvFilter::new("warn"));
+        .with_filter(file_filter);
 
-    // Create a layer for stderr (info and debug messages)
-    let stderr_layer = fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_target(false)
-        .with_filter(filter);
-
-    // Combine both layers
+    // Initialize subscriber with only file layer (no stderr output)
     tracing_subscriber::registry()
         .with(file_layer)
-        .with(stderr_layer)
         .init();
 }
 
@@ -260,8 +263,29 @@ fn convert_events(
     // Initialize input reader with preprocessing options
     let mut reader = InputReader::with_options(input.to_str().unwrap(), filter_invalid_kinds)?;
 
+    // Count total lines for progress bar
+    let total_lines = if show_progress {
+        std::fs::read_to_string(input)
+            .map(|content| content.lines().count() as u64)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
     // Set up progress bar
-    let progress = if show_progress {
+    let progress = if show_progress && total_lines > 0 {
+        let pb = ProgressBar::new(total_lines);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {msg}")
+                .unwrap()
+                .progress_chars("█▓▒░ ")
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+        );
+        pb.enable_steady_tick(Duration::from_millis(100));
+        Some(pb)
+    } else if show_progress {
+        // Fallback to spinner if we can't count lines
         let pb = ProgressBar::new_spinner();
         pb.set_style(
             ProgressStyle::default_spinner()
@@ -301,9 +325,10 @@ fn convert_events(
 
         // Update progress
         if let Some(ref pb) = progress {
+            pb.set_position(stats.total_lines);
             pb.set_message(format!(
-                "Processed: {} | Valid: {} | Errors: {} | Dupes: {}",
-                stats.total_lines, stats.valid_events, stats.invalid_events, stats.duplicates
+                "Valid: {} | Errors: {} | Dupes: {}",
+                stats.valid_events, stats.invalid_events, stats.duplicates
             ));
         }
 
@@ -453,6 +478,9 @@ fn convert_events_parallel(
     // Shared stats
     let stats = Arc::new(Mutex::new(ConversionStats::new()));
 
+    // Get file size for progress bar
+    let file_size = std::fs::metadata(input)?.len();
+
     // Find chunk boundaries
     info!(
         "Calculating chunk boundaries for {} threads...",
@@ -461,13 +489,14 @@ fn convert_events_parallel(
     let chunks = find_chunk_boundaries(input, num_threads)?;
     info!("Processing {} chunks in parallel", chunks.len());
 
-    // Progress bar
+    // Progress bar (track by bytes processed for parallel mode)
     let progress = if show_progress {
-        let pb = ProgressBar::new_spinner();
+        let pb = ProgressBar::new(file_size);
         pb.set_style(
-            ProgressStyle::default_spinner()
-                .template("{spinner:.green} [{elapsed_precise}] {msg}")
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({percent}%) {msg}")
                 .unwrap()
+                .progress_chars("█▓▒░ ")
                 .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
         );
         pb.enable_steady_tick(Duration::from_millis(100));
@@ -634,13 +663,12 @@ fn process_chunk(
             continue;
         }
 
-        // Update progress periodically
-        if line_num.is_multiple_of(100)
-            && let Some(ref pb) = progress
-        {
+        // Update progress periodically (every 10 lines for better responsiveness)
+        if line_num.is_multiple_of(10) && let Some(ref pb) = progress {
             let stats = global_stats.lock().unwrap();
+            pb.set_position(position);
             pb.set_message(format!(
-                "Processed: {} | Valid: {} | Errors: {} | Dupes: {}",
+                "Lines: {} | Valid: {} | Errors: {} | Dupes: {}",
                 stats.total_lines, stats.valid_events, stats.invalid_events, stats.duplicates
             ));
         }
