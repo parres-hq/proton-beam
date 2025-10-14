@@ -476,6 +476,9 @@ fn convert_events_parallel(
     // Shared stats
     let stats = Arc::new(Mutex::new(ConversionStats::new()));
 
+    // Shared progress counter for bytes processed
+    let bytes_processed = Arc::new(Mutex::new(0u64));
+
     // Get file size for progress bar
     let file_size = std::fs::metadata(input)?.len();
 
@@ -512,6 +515,7 @@ fn convert_events_parallel(
             let temp_dir = temp_dir.clone();
             let index = Arc::clone(&index);
             let stats = Arc::clone(&stats);
+            let bytes_processed = Arc::clone(&bytes_processed);
             let progress = progress.as_ref().map(Arc::clone);
 
             std::thread::spawn(move || {
@@ -523,6 +527,7 @@ fn convert_events_parallel(
                     &temp_dir,
                     index,
                     stats,
+                    bytes_processed,
                     progress,
                     validate,
                     batch_size,
@@ -615,6 +620,7 @@ fn process_chunk(
     temp_dir: &Path,
     global_index: Arc<Mutex<proton_beam_core::EventIndex>>,
     global_stats: Arc<Mutex<ConversionStats>>,
+    bytes_processed: Arc<Mutex<u64>>,
     progress: Option<Arc<ProgressBar>>,
     validate: bool,
     batch_size: usize,
@@ -630,12 +636,20 @@ fn process_chunk(
     let mut local_seen = HashSet::new();
     let mut index_buffer: Vec<(ProtoEvent, String)> = Vec::with_capacity(batch_size);
 
-    // Local stats
+    // Local stats for this chunk
     let mut local_stats = ConversionStats::new();
     let mut filtered_count = 0usize;
 
+    // Track stats since last global update (for periodic syncing)
+    let mut lines_since_update = 0u64;
+    let mut valid_since_update = 0u64;
+    let mut invalid_since_update = 0u64;
+    let mut dupes_since_update = 0u64;
+    let mut skipped_since_update = 0u64;
+
     let mut position = start;
     let mut line_num = 0u64;
+    let mut bytes_since_last_update = 0u64;
 
     while position < end {
         let mut line = String::new();
@@ -646,12 +660,15 @@ fn process_chunk(
         }
 
         position += bytes_read as u64;
+        bytes_since_last_update += bytes_read as u64;
         line_num += 1;
         local_stats.total_lines += 1;
+        lines_since_update += 1;
 
         // Skip empty lines
         if line.trim().is_empty() {
             local_stats.skipped_lines += 1;
+            skipped_since_update += 1;
             continue;
         }
 
@@ -665,11 +682,43 @@ fn process_chunk(
         if line_num.is_multiple_of(10)
             && let Some(ref pb) = progress
         {
-            let stats = global_stats.lock().unwrap();
-            pb.set_position(position);
+            // Update shared byte counter and global stats atomically
+            let (total_bytes, total_lines, valid_events, invalid_events, duplicates) = {
+                let mut bytes = bytes_processed.lock().unwrap();
+                *bytes += bytes_since_last_update;
+                let total_bytes = *bytes;
+                drop(bytes);
+
+                let mut stats = global_stats.lock().unwrap();
+                // Add the incremental counts since last update
+                stats.total_lines += lines_since_update;
+                stats.valid_events += valid_since_update;
+                stats.invalid_events += invalid_since_update;
+                stats.duplicates += dupes_since_update;
+                stats.skipped_lines += skipped_since_update;
+
+                (
+                    total_bytes,
+                    stats.total_lines,
+                    stats.valid_events,
+                    stats.invalid_events,
+                    stats.duplicates,
+                )
+            };
+
+            // Reset incremental counters
+            bytes_since_last_update = 0;
+            lines_since_update = 0;
+            valid_since_update = 0;
+            invalid_since_update = 0;
+            dupes_since_update = 0;
+            skipped_since_update = 0;
+
+            // Update progress bar
+            pb.set_position(total_bytes);
             pb.set_message(format!(
                 "Lines: {} | Valid: {} | Errors: {} | Dupes: {}",
-                stats.total_lines, stats.valid_events, stats.invalid_events, stats.duplicates
+                total_lines, valid_events, invalid_events, duplicates
             ));
         }
 
@@ -679,6 +728,7 @@ fn process_chunk(
             Err(e) => {
                 storage.log_error(line_num, &format!("parse_error: {}", e), None);
                 local_stats.invalid_events += 1;
+                invalid_since_update += 1;
                 continue;
             }
         };
@@ -686,6 +736,7 @@ fn process_chunk(
         // Check for duplicates (local HashSet first, then global index)
         if local_seen.contains(&event.id) {
             local_stats.duplicates += 1;
+            dupes_since_update += 1;
             continue;
         }
 
@@ -697,12 +748,14 @@ fn process_chunk(
         if in_global_index {
             local_seen.insert(event.id.clone());
             local_stats.duplicates += 1;
+            dupes_since_update += 1;
             continue;
         }
 
         // Check against pending buffer
         if index_buffer.iter().any(|(e, _)| e.id == event.id) {
             local_stats.duplicates += 1;
+            dupes_since_update += 1;
             continue;
         }
 
@@ -714,6 +767,7 @@ fn process_chunk(
                 Some(&event.id),
             );
             local_stats.invalid_events += 1;
+            invalid_since_update += 1;
             continue;
         }
 
@@ -727,6 +781,7 @@ fn process_chunk(
                 local_seen.insert(event.id.clone());
                 index_buffer.push((event, file_name));
                 local_stats.valid_events += 1;
+                valid_since_update += 1;
 
                 // Flush index buffer when it reaches batch size
                 if index_buffer.len() >= batch_size {
@@ -746,6 +801,7 @@ fn process_chunk(
                 );
                 storage.log_error(line_num, &format!("storage_error: {}", e), Some(&event.id));
                 local_stats.invalid_events += 1;
+                invalid_since_update += 1;
             }
         }
     }
@@ -762,14 +818,23 @@ fn process_chunk(
             .context("Failed to flush final index batch")?;
     }
 
-    // Update global stats
+    // Final update: flush any remaining incremental stats
     {
-        let mut stats = global_stats.lock().unwrap();
-        stats.total_lines += local_stats.total_lines;
-        stats.valid_events += local_stats.valid_events;
-        stats.invalid_events += local_stats.invalid_events;
-        stats.skipped_lines += local_stats.skipped_lines;
-        stats.duplicates += local_stats.duplicates;
+        // Update bytes if needed
+        if bytes_since_last_update > 0 {
+            let mut bytes = bytes_processed.lock().unwrap();
+            *bytes += bytes_since_last_update;
+        }
+
+        // Update any remaining stats counts
+        if lines_since_update > 0 || valid_since_update > 0 || invalid_since_update > 0 || dupes_since_update > 0 || skipped_since_update > 0 {
+            let mut stats = global_stats.lock().unwrap();
+            stats.total_lines += lines_since_update;
+            stats.valid_events += valid_since_update;
+            stats.invalid_events += invalid_since_update;
+            stats.duplicates += dupes_since_update;
+            stats.skipped_lines += skipped_since_update;
+        }
     }
 
     info!(
