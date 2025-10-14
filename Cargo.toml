@@ -54,6 +54,9 @@ chrono = "0.4"
 # Compression
 flate2 = "1.0"
 
+# Regex
+regex = "1.10"
+
 # Testing
 tempfile = "3.8"
 

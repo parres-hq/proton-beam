@@ -16,8 +16,10 @@ Proton Beam is a highly experimental (and will eventually be a high-performance)
 - 🔄 **Real-time Processing**: Connect to multiple Nostr relays simultaneously
 - 🎯 **Smart Deduplication**: Events stored once across all relay sources
 - 🔍 **Advanced Filtering**: Filter by event kind, author, or tags
+- ⚡ **Input Preprocessing**: Ultra-fast regex-based filtering before JSON parsing
 - 🌐 **Auto-discovery**: Automatically discover and connect to new relays
 - 📊 **Progress Tracking**: Beautiful progress bars for batch operations
+- 🔀 **Parallel Processing**: Multi-threaded conversion for maximum throughput
 
 ## Quick Start
 
@@ -68,6 +70,18 @@ Skip validation for faster processing:
 proton-beam convert events.jsonl --no-validate
 ```
 
+Disable preprocessing filter (enabled by default):
+
+```bash
+proton-beam convert events.jsonl --no-filter-kinds
+```
+
+Parallel processing with multiple threads:
+
+```bash
+proton-beam convert events.jsonl --parallel 8
+```
+
 ### Daemon Usage
 
 Start with default configuration:
@@ -108,6 +122,7 @@ proton-beam/
 - **[Protobuf Schema](docs/PROTOBUF_SCHEMA.md)**: Detailed schema documentation
 - **[Developer Guide](docs/DEVELOPER_GUIDE.md)**: Development setup and workflows
 - **[Benchmarking Guide](docs/BENCHMARKING.md)**: Performance benchmarks and optimization tips
+- **[Preprocessing Guide](docs/PREPROCESSING.md)**: Input filtering and preprocessing options
 - **[Documentation Index](docs/INDEX.md)**: Complete documentation navigation
 - **API Documentation**: Run `cargo doc --open`
 
@@ -130,7 +145,7 @@ just bench
 - Storage throughput: ~473 MB/sec write, ~810 MB/sec read
 - End-to-end pipeline: ~155k events/sec
 
-See [BENCHMARKS_README.md](BENCHMARKS_README.md) for detailed information.
+See [BENCHMARKS_README.md](docs/BENCHMARKS_README.md) for detailed information.
 
 ## Configuration Example
 
@@ -182,6 +197,7 @@ use_index = true
 ✅ **Phase 1 Complete**: Core library fully implemented and tested (62/62 tests passing)
 ✅ **Phase 1.5 Complete**: Enhanced API with builder, Display, Serde, FromIterator
 ✅ **Phase 2 Complete**: CLI tool with progress bars, date-based storage (18/18 tests passing)
+✅ **CI/CD**: Automated testing, linting, formatting, and benchmarks
 🚧 **Next Phase**: SQLite Index & Deduplication
 
 See [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for detailed progress.
@@ -259,7 +275,26 @@ cargo fmt --all
 
 # Lint
 cargo clippy --all-targets --all-features
+
+# Or use just commands (recommended)
+just test      # Run tests
+just fmt       # Check formatting
+just lint      # Run clippy
+just precommit # Run all pre-commit checks (format, lint, tests, MSRV)
 ```
+
+### CI/CD
+
+All code is automatically checked on pull requests:
+- ✅ Format validation (`rustfmt`)
+- ✅ Lint checks (`clippy`)
+- ✅ Documentation builds
+- ✅ Tests on Linux, macOS, and Windows
+- ✅ MSRV compatibility (Rust 1.70+)
+- ✅ Security audit
+- 📊 Performance benchmarks
+
+See [CI Workflows](.github/workflows/README.md) for details.
 
 ## Dependencies
 

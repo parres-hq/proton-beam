@@ -3,19 +3,19 @@
 default:
     @just --list
 
-# Run tests with all features (default)
+# Run tests with all features (default) - excludes benchmarks
 test:
-    cargo test --workspace --all-features --all-targets
+    cargo test --workspace --all-features --lib --bins --tests --examples
     cargo test --workspace --all-features --doc
 
-# Run tests for all feature combinations
+# Run tests for all feature combinations (excludes benchmarks - too slow)
 test-all:
     @echo "Testing with all features..."
-    cargo test --workspace --all-features --all-targets
+    cargo test --workspace --all-features --lib --bins --tests --examples
     cargo test --workspace --all-features --doc
     @echo ""
     @echo "Testing with no default features..."
-    cargo test --workspace --no-default-features --all-targets
+    cargo test --workspace --no-default-features --lib --bins --tests --examples
     @echo ""
     @echo "Testing each crate independently..."
     cargo test -p proton-beam-core --all-features
@@ -155,4 +155,9 @@ bench-quick:
     cargo bench --package proton-beam-core --bench conversion_bench -- --test
     cargo bench --package proton-beam-core --bench validation_bench -- --test
     @echo "✓ Benchmarks compile and run"
+
+# Analyze benchmark history and show trends
+bench-history:
+    @echo "Analyzing benchmark history..."
+    @./scripts/analyze-benchmark-history.sh benchmark-results
 

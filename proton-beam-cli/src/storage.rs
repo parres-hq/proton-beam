@@ -12,6 +12,9 @@ pub struct StorageManager {
     output_dir: PathBuf,
     batch_size: usize,
 
+    // Optional prefix for temp file names (used for parallel processing)
+    file_prefix: Option<String>,
+
     // Map of date string (YYYY_MM_DD) to buffered events
     buffers: HashMap<String, Vec<ProtoEvent>>,
 }
@@ -25,6 +28,21 @@ impl StorageManager {
         Ok(Self {
             output_dir: output_dir.to_path_buf(),
             batch_size,
+            file_prefix: None,
+            buffers: HashMap::new(),
+        })
+    }
+
+    /// Create a new storage manager with a file prefix for parallel processing
+    /// Files will be named: {prefix}_{date}.pb.gz.tmp
+    pub fn new_with_prefix(output_dir: &Path, batch_size: usize, thread_id: usize) -> Result<Self> {
+        // Create the output directory if it doesn't exist
+        std::fs::create_dir_all(output_dir).context("Failed to create output directory")?;
+
+        Ok(Self {
+            output_dir: output_dir.to_path_buf(),
+            batch_size,
+            file_prefix: Some(format!("thread_{}", thread_id)),
             buffers: HashMap::new(),
         })
     }
@@ -71,7 +89,13 @@ impl StorageManager {
         };
 
         // Open the output file for this date (append mode)
-        let filename = format!("{}.pb.gz", date_str);
+        let filename = if let Some(ref prefix) = self.file_prefix {
+            // Parallel mode: thread_{id}_{date}.pb.gz.tmp
+            format!("{}_{}.pb.gz.tmp", prefix, date_str)
+        } else {
+            // Normal mode: {date}.pb.gz
+            format!("{}.pb.gz", date_str)
+        };
         let output_path = self.output_dir.join(&filename);
 
         let file = OpenOptions::new()

@@ -1748,6 +1748,7 @@ dependencies = [
  "indicatif",
  "predicates",
  "proton-beam-core",
+ "regex",
  "serde_json",
  "tempfile",
  "tokio",

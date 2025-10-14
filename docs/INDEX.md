@@ -48,6 +48,40 @@ Welcome to the Proton Beam documentation! This index will help you find the info
   - CI/CD integration
   - Regression detection
 
+- **[Benchmark Best Practices](BENCHMARK_PRACTICES.md)** ⭐ - When and how to run benchmarks
+  - When to run benchmarks (and when not to)
+  - CI integration strategy
+  - Storing benchmark history
+  - Interpreting results
+  - Regression prevention
+  - Optimization workflow
+
+- **[CI/CD Setup](CI_CD_SETUP.md)** ⭐ - Continuous Integration and Deployment
+  - GitHub Actions workflows
+  - Automated testing and quality checks
+  - Performance benchmarking in CI
+  - Branch protection setup
+  - Caching strategy
+  - Troubleshooting guide
+
+- **[Preprocessing Guide](PREPROCESSING.md)** - Input filtering and preprocessing
+  - Kind value filtering
+  - Performance benefits
+  - Usage examples
+  - Implementation details
+  - Best practices
+
+- **[Parallel Processing](PARALLEL_PROCESSING.md)** - Multi-threaded conversion
+  - Parallel architecture
+  - Thread-safe design
+  - Performance analysis
+  - Best practices
+
+- **[Benchmark Status](BENCHMARK_STATUS.md)** - Benchmark implementation tracking
+- **[Benchmark Summary](BENCHMARK_SUMMARY.md)** - Detailed benchmark results
+- **[Benchmarks README](BENCHMARKS_README.md)** - Comprehensive benchmarking guide
+- **[Compression Implementation](COMPRESSION_IMPLEMENTATION.md)** - Compression strategy details
+
 ## 🚀 Quick Navigation
 
 ### I want to...
@@ -66,6 +100,8 @@ Welcome to the Proton Beam documentation! This index will help you find the info
 - **Set up development environment** → [Developer Guide - Setup](DEVELOPER_GUIDE.md#setup)
 - **Write tests** → [Developer Guide - Testing](DEVELOPER_GUIDE.md#testing)
 - **Run benchmarks** → [Benchmarking Guide](BENCHMARKING.md#running-benchmarks)
+- **Understand benchmark workflow** → [Benchmark Best Practices](BENCHMARK_PRACTICES.md)
+- **Understand CI/CD** → [CI/CD Setup](CI_CD_SETUP.md)
 - **Add new features** → [Developer Guide - Common Tasks](DEVELOPER_GUIDE.md#common-tasks)
 - **Submit changes** → [Contributing Guidelines](CONTRIBUTING.md)
 

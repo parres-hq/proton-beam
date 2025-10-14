@@ -76,6 +76,9 @@ just bench-save
 
 # Compare two benchmark runs
 just bench-compare benchmark-results/bench-20250113-100000.txt benchmark-results/bench-20250113-110000.txt
+
+# Analyze benchmark history (compare oldest vs newest)
+just bench-history
 ```
 
 ## Test Commands
@@ -231,6 +234,7 @@ alias jpc='just precommit'
 - `bench-pipeline` - Pipeline benchmarks
 - `bench-save` - Save results with timestamp
 - `bench-compare` - Compare two benchmark runs
+- `bench-history` - Analyze all saved benchmark history
 - `bench-quick` - Quick smoke test
 
 ### 🔍 Code Quality

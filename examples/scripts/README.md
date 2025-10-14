@@ -122,7 +122,25 @@ Analyzes conversion errors and generates reports.
 
 ---
 
-### 6. `compare_sizes.sh`
+### 6. `preprocess_filtering.sh`
+
+Demonstrates the ultra-fast preprocessing filter for invalid kinds.
+
+```bash
+./preprocess_filtering.sh
+```
+
+**What it does:**
+- Runs conversion twice: with and without `--filter-invalid-kinds`
+- Shows performance comparison
+- Demonstrates filtered event counts
+- Explains when to use preprocessing
+
+**Good for:** Understanding preprocessing benefits, optimizing large datasets
+
+---
+
+### 7. `compare_sizes.sh`
 
 Compares JSON vs Protobuf storage sizes.
 
@@ -178,6 +196,7 @@ Some scripts require additional tools:
 | `fast_conversion.sh` | proton-beam |
 | `daily_backup.sh` | proton-beam, nak, tar |
 | `analyze_errors.sh` | proton-beam, jq (optional) |
+| `preprocess_filtering.sh` | proton-beam |
 | `compare_sizes.sh` | proton-beam, bc |
 
 ### Installing Dependencies

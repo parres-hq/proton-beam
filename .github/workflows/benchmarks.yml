@@ -1,0 +1,178 @@
+name: Performance Benchmarks
+
+on:
+  # Run on pull requests that modify relevant code
+  pull_request:
+    paths:
+      - 'proton-beam-core/**'
+      - 'proton-beam-cli/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/benchmarks.yml'
+
+  # Run on main branch to track baseline
+  push:
+    branches:
+      - main
+    paths:
+      - 'proton-beam-core/**'
+      - 'proton-beam-cli/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+  # Allow manual triggering
+  workflow_dispatch:
+
+  # Run weekly to track performance over time
+  schedule:
+    - cron: '0 2 * * 0'  # Every Sunday at 2 AM UTC
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for comparison
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-git-
+
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-bench-
+
+      - name: Build benchmarks
+        run: cargo build --workspace --benches --release
+
+      - name: Run benchmarks
+        run: |
+          mkdir -p benchmark-results
+          cargo bench --workspace --no-fail-fast 2>&1 | tee benchmark-results/bench-${{ github.sha }}.txt
+
+      - name: Generate benchmark summary
+        run: |
+          echo "# Benchmark Results" > benchmark-results/summary.md
+          echo "" >> benchmark-results/summary.md
+          echo "**Commit:** ${{ github.sha }}" >> benchmark-results/summary.md
+          echo "**Branch:** ${{ github.ref_name }}" >> benchmark-results/summary.md
+          echo "**Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> benchmark-results/summary.md
+          echo "" >> benchmark-results/summary.md
+          echo "## Full Results" >> benchmark-results/summary.md
+          echo '```' >> benchmark-results/summary.md
+          cat benchmark-results/bench-${{ github.sha }}.txt >> benchmark-results/summary.md
+          echo '```' >> benchmark-results/summary.md
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: benchmark-results/
+          retention-days: 90
+
+      - name: Download baseline (if exists)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results-baseline
+          path: baseline-results/
+
+      - name: Compare with baseline
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: |
+          if [ -f baseline-results/bench-baseline.txt ]; then
+            echo "## Benchmark Comparison" > comparison.md
+            echo "" >> comparison.md
+            echo "Comparing current PR against baseline (main branch)" >> comparison.md
+            echo "" >> comparison.md
+            echo '```diff' >> comparison.md
+            diff baseline-results/bench-baseline.txt benchmark-results/bench-${{ github.sha }}.txt >> comparison.md || true
+            echo '```' >> comparison.md
+
+            # Comment on PR (requires write permissions)
+            if [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
+              gh pr comment ${{ github.event.pull_request.number }} --body-file comparison.md || echo "Could not post comment"
+            fi
+          else
+            echo "No baseline found for comparison"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Save as baseline (main branch only)
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-baseline
+          path: benchmark-results/bench-${{ github.sha }}.txt
+          retention-days: 90
+
+  # Optional: Check for significant regressions
+  regression-check:
+    name: Check for Regressions
+    runs-on: ubuntu-latest
+    needs: benchmark
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download current results
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: current-results/
+
+      - name: Download baseline
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results-baseline
+          path: baseline-results/
+
+      - name: Analyze for regressions
+        run: |
+          echo "Checking for significant performance regressions (>15%)"
+
+          # This is a placeholder for more sophisticated analysis
+          # You could add a Python script here to parse results and detect regressions
+
+          # For now, just note that this check exists
+          echo "✓ No automated regression detection implemented yet"
+          echo "  Manual review of benchmark results is recommended"
+          echo ""
+          echo "📊 See uploaded artifacts for detailed results"
+
