@@ -49,6 +49,9 @@ jobs:
           toolchain: stable
           components: clippy
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Cache cargo registry
         uses: actions/cache@v3
         with:
@@ -92,6 +95,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Cache cargo registry
         uses: actions/cache@v3
@@ -139,6 +145,18 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+
+      - name: Install protobuf compiler (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install protobuf compiler (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install protobuf compiler (Windows)
+        if: runner.os == 'Windows'
+        run: choco install protoc
 
       - name: Cache cargo registry
         uses: actions/cache@v3
@@ -190,6 +208,9 @@ jobs:
         with:
           toolchain: ${{ env.MSRV }}
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Cache cargo registry
         uses: actions/cache@v3
         with:
@@ -236,6 +257,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Cache cargo registry
         uses: actions/cache@v3
