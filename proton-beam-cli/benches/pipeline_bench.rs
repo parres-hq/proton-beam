@@ -1,14 +1,18 @@
-use proton_beam_core::{ProtoEvent, ProtoEventBuilder, validate_event, validation::validate_basic_fields};
 use proton_beam_core::write_events_delimited;
+use proton_beam_core::{
+    ProtoEvent, ProtoEventBuilder, validate_event, validation::validate_basic_fields,
+};
 use std::fs::File;
-use std::io::{BufWriter, BufReader, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::time::Instant;
 use tempfile::TempDir;
 
 fn create_test_event_json(id: u64) -> String {
     format!(
         r#"{{"id":"{:064x}","pubkey":"79dff8f82963424e0bb02708a22e44b4980893e3a4be0fa3cb60a43b946764e3","created_at":{},"kind":1,"tags":[["p","79dff8f82963424e0bb02708a22e44b4980893e3a4be0fa3cb60a43b946764e3"],["t","test"]],"content":"Test event {}","sig":"908a15e46fb4d8675bab026fc230a0e3542bfade63da02d542fb78b2a8513fcd0092619a2c8c1221e581946e0191f2af505dfdf8657a414dbca329186f009262"}}"#,
-        id, 1671217411 + id as i64, id
+        id,
+        1671217411 + id as i64,
+        id
     )
 }
 
@@ -48,7 +52,7 @@ fn benchmark_end_to_end_conversion() {
     let file = File::open(&input_file).unwrap();
     let reader = BufReader::new(file);
     let events: Vec<ProtoEvent> = std::io::BufRead::lines(reader)
-        .filter_map(|line| line.ok())
+        .map_while(Result::ok)
         .filter_map(|line| ProtoEvent::try_from(line.as_str()).ok())
         .collect();
 
@@ -74,9 +78,18 @@ fn benchmark_end_to_end_conversion() {
 
     println!("  Input events: {}", num_events);
     println!("  Valid events: {}", valid_events.len());
-    println!("  Input size: {:.2} MB", input_size as f64 / (1024.0 * 1024.0));
-    println!("  Output size: {:.2} MB", output_size as f64 / (1024.0 * 1024.0));
-    println!("  Compression: {:.1}%", ((input_size - output_size) as f64 / input_size as f64) * 100.0);
+    println!(
+        "  Input size: {:.2} MB",
+        input_size as f64 / (1024.0 * 1024.0)
+    );
+    println!(
+        "  Output size: {:.2} MB",
+        output_size as f64 / (1024.0 * 1024.0)
+    );
+    println!(
+        "  Compression: {:.1}%",
+        ((input_size - output_size) as f64 / input_size as f64) * 100.0
+    );
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Events/sec: {:.0}", events_per_sec);
     println!("  Throughput: {:.2} MB/s", mb_per_sec);
@@ -101,7 +114,7 @@ fn benchmark_parsing_only() {
     let file = File::open(&input_file).unwrap();
     let reader = BufReader::new(file);
     let events: Vec<ProtoEvent> = std::io::BufRead::lines(reader)
-        .filter_map(|line| line.ok())
+        .map_while(Result::ok)
         .filter_map(|line| ProtoEvent::try_from(line.as_str()).ok())
         .collect();
 
@@ -112,16 +125,17 @@ fn benchmark_parsing_only() {
     println!("  Events parsed: {}", events.len());
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Events/sec: {:.0}", events_per_sec);
-    println!("  Avg time per event: {:.2}µs", duration.as_micros() as f64 / events.len() as f64);
+    println!(
+        "  Avg time per event: {:.2}µs",
+        duration.as_micros() as f64 / events.len() as f64
+    );
 }
 
 fn benchmark_validation_overhead() {
     println!("\n=== Benchmark: Validation Overhead in Pipeline ===");
 
     let num_events = 10_000;
-    let events: Vec<ProtoEvent> = (0..num_events)
-        .map(create_test_event_proto)
-        .collect();
+    let events: Vec<ProtoEvent> = (0..num_events).map(create_test_event_proto).collect();
 
     // Without validation
     let start_no_validation = Instant::now();
@@ -138,30 +152,37 @@ fn benchmark_validation_overhead() {
 
     // With full validation (will fail, but measures overhead)
     let start_full = Instant::now();
-    let count_full = events
-        .iter()
-        .filter(|e| validate_event(e).is_ok())
-        .count();
+    let count_full = events.iter().filter(|e| validate_event(e).is_ok()).count();
     let duration_full = start_full.elapsed();
 
     println!("  Events: {}", num_events);
-    println!("  No validation: {:.2}s ({:.0} events/s)",
+    println!(
+        "  No validation: {:.2}s ({:.0} events/s)",
         duration_no_validation.as_secs_f64(),
-        num_events as f64 / duration_no_validation.as_secs_f64());
-    println!("  Basic validation: {:.2}s ({:.0} events/s, passed: {})",
+        num_events as f64 / duration_no_validation.as_secs_f64()
+    );
+    println!(
+        "  Basic validation: {:.2}s ({:.0} events/s, passed: {})",
         duration_basic.as_secs_f64(),
         num_events as f64 / duration_basic.as_secs_f64(),
-        count_basic);
-    println!("  Full validation: {:.2}s ({:.0} events/s, passed: {})",
+        count_basic
+    );
+    println!(
+        "  Full validation: {:.2}s ({:.0} events/s, passed: {})",
         duration_full.as_secs_f64(),
         num_events as f64 / duration_full.as_secs_f64(),
-        count_full);
+        count_full
+    );
 
     if duration_no_validation.as_nanos() > 0 {
-        let basic_overhead = ((duration_basic.as_nanos() as f64 - duration_no_validation.as_nanos() as f64)
-            / duration_no_validation.as_nanos() as f64) * 100.0;
-        let full_overhead = ((duration_full.as_nanos() as f64 - duration_no_validation.as_nanos() as f64)
-            / duration_no_validation.as_nanos() as f64) * 100.0;
+        let basic_overhead = ((duration_basic.as_nanos() as f64
+            - duration_no_validation.as_nanos() as f64)
+            / duration_no_validation.as_nanos() as f64)
+            * 100.0;
+        let full_overhead = ((duration_full.as_nanos() as f64
+            - duration_no_validation.as_nanos() as f64)
+            / duration_no_validation.as_nanos() as f64)
+            * 100.0;
 
         println!("  Basic validation overhead: {:.1}%", basic_overhead);
         println!("  Full validation overhead: {:.1}%", full_overhead);
@@ -173,9 +194,7 @@ fn benchmark_batch_sizes() {
 
     let temp_dir = TempDir::new().unwrap();
     let num_events = 10_000;
-    let events: Vec<ProtoEvent> = (0..num_events)
-        .map(create_test_event_proto)
-        .collect();
+    let events: Vec<ProtoEvent> = (0..num_events).map(create_test_event_proto).collect();
 
     let batch_sizes = vec![100, 500, 1000, 2000, 5000];
 
@@ -195,10 +214,12 @@ fn benchmark_batch_sizes() {
 
         let events_per_sec = num_events as f64 / duration.as_secs_f64();
 
-        println!("  Batch size {}: {:.2}s ({:.0} events/s)",
+        println!(
+            "  Batch size {}: {:.2}s ({:.0} events/s)",
             batch_size,
             duration.as_secs_f64(),
-            events_per_sec);
+            events_per_sec
+        );
     }
 }
 
@@ -227,15 +248,12 @@ fn benchmark_memory_efficient_streaming() {
         let output = File::create(&output_file).unwrap();
         let mut writer = BufWriter::new(output);
 
-        for line_result in std::io::BufRead::lines(reader) {
-            if let Ok(line) = line_result {
-                if let Ok(event) = ProtoEvent::try_from(line.as_str()) {
-                    if validate_basic_fields(&event).is_ok() {
-                        if let Ok(_) = proton_beam_core::write_event_delimited(&mut writer, &event) {
-                            processed += 1;
-                        }
-                    }
-                }
+        for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
+            if let Ok(event) = ProtoEvent::try_from(line.as_str())
+                && validate_basic_fields(&event).is_ok()
+                && proton_beam_core::write_event_delimited(&mut writer, &event).is_ok()
+            {
+                processed += 1;
             }
         }
     }
@@ -246,7 +264,10 @@ fn benchmark_memory_efficient_streaming() {
     let events_per_sec = processed as f64 / duration.as_secs_f64();
 
     println!("  Events processed: {}", processed);
-    println!("  Input size: {:.2} MB", input_size as f64 / (1024.0 * 1024.0));
+    println!(
+        "  Input size: {:.2} MB",
+        input_size as f64 / (1024.0 * 1024.0)
+    );
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Events/sec: {:.0}", events_per_sec);
     println!("  (Peak memory: minimal - streaming one event at a time)");
@@ -279,12 +300,10 @@ fn benchmark_error_handling_overhead() {
     let mut valid_count = 0;
     let mut error_count = 0;
 
-    for line_result in std::io::BufRead::lines(reader) {
-        if let Ok(line) = line_result {
-            match ProtoEvent::try_from(line.as_str()) {
-                Ok(_) => valid_count += 1,
-                Err(_) => error_count += 1,
-            }
+    for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
+        match ProtoEvent::try_from(line.as_str()) {
+            Ok(_) => valid_count += 1,
+            Err(_) => error_count += 1,
         }
     }
 
@@ -297,7 +316,10 @@ fn benchmark_error_handling_overhead() {
     println!("  Errors: {}", error_count);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Lines/sec: {:.0}", total_per_sec);
-    println!("  Error rate: {:.1}%", (error_count as f64 / num_events as f64) * 100.0);
+    println!(
+        "  Error rate: {:.1}%",
+        (error_count as f64 / num_events as f64) * 100.0
+    );
 }
 
 fn benchmark_large_file_processing() {
@@ -326,11 +348,9 @@ fn benchmark_large_file_processing() {
         let output = File::create(&output_file).unwrap();
         let mut writer = BufWriter::new(output);
 
-        for line_result in std::io::BufRead::lines(reader) {
-            if let Ok(line) = line_result {
-                if let Ok(event) = ProtoEvent::try_from(line.as_str()) {
-                    let _ = proton_beam_core::write_event_delimited(&mut writer, &event);
-                }
+        for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
+            if let Ok(event) = ProtoEvent::try_from(line.as_str()) {
+                let _ = proton_beam_core::write_event_delimited(&mut writer, &event);
             }
         }
     }
@@ -342,9 +362,18 @@ fn benchmark_large_file_processing() {
     let mb_per_sec = (input_size as f64 / (1024.0 * 1024.0)) / duration.as_secs_f64();
 
     println!("  Events processed: {}", num_events);
-    println!("  Input size: {:.2} MB", input_size as f64 / (1024.0 * 1024.0));
-    println!("  Output size: {:.2} MB", output_size as f64 / (1024.0 * 1024.0));
-    println!("  Compression: {:.1}%", ((input_size - output_size) as f64 / input_size as f64) * 100.0);
+    println!(
+        "  Input size: {:.2} MB",
+        input_size as f64 / (1024.0 * 1024.0)
+    );
+    println!(
+        "  Output size: {:.2} MB",
+        output_size as f64 / (1024.0 * 1024.0)
+    );
+    println!(
+        "  Compression: {:.1}%",
+        ((input_size - output_size) as f64 / input_size as f64) * 100.0
+    );
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Events/sec: {:.0}", events_per_sec);
     println!("  Throughput: {:.2} MB/s", mb_per_sec);
@@ -369,4 +398,3 @@ fn main() {
     println!("  - Skip validation with --no-validate for maximum speed");
     println!("  - Streaming mode keeps memory usage constant regardless of file size");
 }
-

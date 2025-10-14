@@ -84,10 +84,15 @@ fn test_convert_sample_events() {
     let pb_files: Vec<_> = fs::read_dir(temp_dir.path())
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "pb"))
+        .filter(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| name.ends_with(".pb.gz"))
+        })
         .collect();
 
-    assert!(!pb_files.is_empty(), "No .pb files were created");
+    assert!(!pb_files.is_empty(), "No .pb.gz files were created");
 
     // Check that errors.jsonl exists
     let error_file = temp_dir.path().join("errors.jsonl");
@@ -204,30 +209,33 @@ fn test_date_based_organization() {
 
     cmd.assert().success();
 
-    // Look for .pb files in date format (YYYY_MM_DD.pb)
+    // Look for .pb.gz files in date format (YYYY_MM_DD.pb.gz)
     let pb_files: Vec<_> = fs::read_dir(temp_dir.path())
         .unwrap()
         .filter_map(|e| e.ok())
         .filter(|e| {
             let path = e.path();
-            path.extension().is_some_and(|ext| ext == "pb")
-                && path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .is_some_and(|name| {
-                        // Check if filename matches YYYY_MM_DD pattern
-                        let parts: Vec<&str> = name.split('_').collect();
-                        parts.len() == 3
-                            && parts[0].len() == 4
-                            && parts[1].len() == 2
-                            && parts[2].len() == 2
-                    })
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| {
+                    // Check if filename matches YYYY_MM_DD.pb.gz pattern
+                    if !name.ends_with(".pb.gz") {
+                        return false;
+                    }
+                    // Strip the .pb.gz extension and check the date format
+                    let stem = &name[..name.len() - 6]; // Remove ".pb.gz"
+                    let parts: Vec<&str> = stem.split('_').collect();
+                    parts.len() == 3
+                        && parts[0].len() == 4
+                        && parts[1].len() == 2
+                        && parts[2].len() == 2
+                })
         })
         .collect();
 
     assert!(
         !pb_files.is_empty(),
-        "Should have at least one date-formatted .pb file"
+        "Should have at least one date-formatted .pb.gz file"
     );
 }
 
@@ -319,7 +327,7 @@ fn test_index_creation() {
     cmd.assert().success();
 
     // Check that index was created
-    let index_file = temp_dir.path().join(".index.db");
+    let index_file = temp_dir.path().join("index.db");
     assert!(index_file.exists(), "Index database was not created");
 }
 
@@ -392,7 +400,7 @@ fn test_custom_index_path() {
     );
 
     // Default index should not exist
-    let default_index = temp_dir.path().join(".index.db");
+    let default_index = temp_dir.path().join("index.db");
     assert!(
         !default_index.exists(),
         "Default index was created when custom path was specified"

@@ -89,7 +89,10 @@ pub use builder::ProtoEventBuilder;
 pub use conversion::{json_to_proto, proto_to_json};
 pub use error::{Error, Result};
 pub use index::{EventIndex, EventRecord, IndexStats};
-pub use storage::{read_events_delimited, write_event_delimited, write_events_delimited};
+pub use storage::{
+    create_gzip_decoder, create_gzip_encoder, read_events_delimited, write_event_delimited,
+    write_events_delimited,
+};
 pub use validation::validate_event;
 
 #[cfg(test)]

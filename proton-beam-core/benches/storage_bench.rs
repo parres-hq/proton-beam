@@ -1,6 +1,9 @@
-use proton_beam_core::{ProtoEvent, ProtoEventBuilder, write_event_delimited, write_events_delimited, read_events_delimited};
+use proton_beam_core::{
+    ProtoEvent, ProtoEventBuilder, read_events_delimited, write_event_delimited,
+    write_events_delimited,
+};
 use std::fs::File;
-use std::io::{BufWriter, BufReader};
+use std::io::{BufReader, BufWriter};
 use std::time::Instant;
 use tempfile::TempDir;
 
@@ -24,9 +27,7 @@ fn benchmark_write_single() {
     let file_path = temp_dir.path().join("events.pb");
 
     let num_events = 10_000;
-    let events: Vec<ProtoEvent> = (0..num_events)
-        .map(|i| create_test_event(i, 1))
-        .collect();
+    let events: Vec<ProtoEvent> = (0..num_events).map(|i| create_test_event(i, 1)).collect();
 
     let start = Instant::now();
     {
@@ -44,11 +45,17 @@ fn benchmark_write_single() {
     let mb_per_sec = (file_size as f64 / (1024.0 * 1024.0)) / duration.as_secs_f64();
 
     println!("  Events written: {}", num_events);
-    println!("  File size: {:.2} MB", file_size as f64 / (1024.0 * 1024.0));
+    println!(
+        "  File size: {:.2} MB",
+        file_size as f64 / (1024.0 * 1024.0)
+    );
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Events/sec: {:.0}", events_per_sec);
     println!("  Throughput: {:.2} MB/s", mb_per_sec);
-    println!("  Avg time per event: {:.2}µs", duration.as_micros() as f64 / num_events as f64);
+    println!(
+        "  Avg time per event: {:.2}µs",
+        duration.as_micros() as f64 / num_events as f64
+    );
 }
 
 fn benchmark_write_batch() {
@@ -58,9 +65,7 @@ fn benchmark_write_batch() {
     let file_path = temp_dir.path().join("events.pb");
 
     let num_events = 10_000;
-    let events: Vec<ProtoEvent> = (0..num_events)
-        .map(|i| create_test_event(i, 1))
-        .collect();
+    let events: Vec<ProtoEvent> = (0..num_events).map(|i| create_test_event(i, 1)).collect();
 
     let start = Instant::now();
     {
@@ -75,11 +80,17 @@ fn benchmark_write_batch() {
     let mb_per_sec = (file_size as f64 / (1024.0 * 1024.0)) / duration.as_secs_f64();
 
     println!("  Events written: {}", num_events);
-    println!("  File size: {:.2} MB", file_size as f64 / (1024.0 * 1024.0));
+    println!(
+        "  File size: {:.2} MB",
+        file_size as f64 / (1024.0 * 1024.0)
+    );
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Events/sec: {:.0}", events_per_sec);
     println!("  Throughput: {:.2} MB/s", mb_per_sec);
-    println!("  Avg time per event: {:.2}µs", duration.as_micros() as f64 / num_events as f64);
+    println!(
+        "  Avg time per event: {:.2}µs",
+        duration.as_micros() as f64 / num_events as f64
+    );
 }
 
 fn benchmark_read_sequential() {
@@ -90,9 +101,7 @@ fn benchmark_read_sequential() {
 
     // First, write events
     let num_events = 10_000;
-    let events: Vec<ProtoEvent> = (0..num_events)
-        .map(|i| create_test_event(i, 1))
-        .collect();
+    let events: Vec<ProtoEvent> = (0..num_events).map(|i| create_test_event(i, 1)).collect();
 
     {
         let file = File::create(&file_path).unwrap();
@@ -115,11 +124,17 @@ fn benchmark_read_sequential() {
     let mb_per_sec = (file_size as f64 / (1024.0 * 1024.0)) / duration.as_secs_f64();
 
     println!("  Events read: {}", read_events.len());
-    println!("  File size: {:.2} MB", file_size as f64 / (1024.0 * 1024.0));
+    println!(
+        "  File size: {:.2} MB",
+        file_size as f64 / (1024.0 * 1024.0)
+    );
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Events/sec: {:.0}", events_per_sec);
     println!("  Throughput: {:.2} MB/s", mb_per_sec);
-    println!("  Avg time per event: {:.2}µs", duration.as_micros() as f64 / read_events.len() as f64);
+    println!(
+        "  Avg time per event: {:.2}µs",
+        duration.as_micros() as f64 / read_events.len() as f64
+    );
 }
 
 fn benchmark_read_streaming() {
@@ -130,9 +145,7 @@ fn benchmark_read_streaming() {
 
     // First, write events
     let num_events = 10_000;
-    let events: Vec<ProtoEvent> = (0..num_events)
-        .map(|i| create_test_event(i, 1))
-        .collect();
+    let events: Vec<ProtoEvent> = (0..num_events).map(|i| create_test_event(i, 1)).collect();
 
     {
         let file = File::create(&file_path).unwrap();
@@ -158,11 +171,17 @@ fn benchmark_read_streaming() {
     let mb_per_sec = (file_size as f64 / (1024.0 * 1024.0)) / duration.as_secs_f64();
 
     println!("  Events processed: {}", count);
-    println!("  File size: {:.2} MB", file_size as f64 / (1024.0 * 1024.0));
+    println!(
+        "  File size: {:.2} MB",
+        file_size as f64 / (1024.0 * 1024.0)
+    );
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Events/sec: {:.0}", events_per_sec);
     println!("  Throughput: {:.2} MB/s", mb_per_sec);
-    println!("  Avg time per event: {:.2}µs", duration.as_micros() as f64 / count as f64);
+    println!(
+        "  Avg time per event: {:.2}µs",
+        duration.as_micros() as f64 / count as f64
+    );
 }
 
 fn benchmark_write_large_events() {
@@ -201,8 +220,14 @@ fn benchmark_write_large_events() {
     let mb_per_sec = (file_size as f64 / (1024.0 * 1024.0)) / duration.as_secs_f64();
 
     println!("  Events written: {}", num_events);
-    println!("  Avg event size: ~{:.2} KB", (file_size as f64 / num_events as f64) / 1024.0);
-    println!("  File size: {:.2} MB", file_size as f64 / (1024.0 * 1024.0));
+    println!(
+        "  Avg event size: ~{:.2} KB",
+        (file_size as f64 / num_events as f64) / 1024.0
+    );
+    println!(
+        "  File size: {:.2} MB",
+        file_size as f64 / (1024.0 * 1024.0)
+    );
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Events/sec: {:.0}", events_per_sec);
     println!("  Throughput: {:.2} MB/s", mb_per_sec);
@@ -215,9 +240,7 @@ fn benchmark_round_trip_storage() {
     let file_path = temp_dir.path().join("roundtrip.pb");
 
     let num_events = 5_000;
-    let events: Vec<ProtoEvent> = (0..num_events)
-        .map(|i| create_test_event(i, 1))
-        .collect();
+    let events: Vec<ProtoEvent> = (0..num_events).map(|i| create_test_event(i, 1)).collect();
 
     let start = Instant::now();
 
@@ -241,29 +264,30 @@ fn benchmark_round_trip_storage() {
     let round_trips_per_sec = read_events.len() as f64 / duration.as_secs_f64();
 
     println!("  Events processed: {}", read_events.len());
-    println!("  File size: {:.2} MB", file_size as f64 / (1024.0 * 1024.0));
+    println!(
+        "  File size: {:.2} MB",
+        file_size as f64 / (1024.0 * 1024.0)
+    );
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Round trips/sec: {:.0}", round_trips_per_sec);
-    println!("  Avg time per round trip: {:.2}µs", duration.as_micros() as f64 / read_events.len() as f64);
+    println!(
+        "  Avg time per round trip: {:.2}µs",
+        duration.as_micros() as f64 / read_events.len() as f64
+    );
 }
 
 fn benchmark_compression_ratio() {
-    println!("\n=== Benchmark: Compression Ratio Analysis ===");
+    println!("\n=== Benchmark: Protobuf vs JSON Size ===");
 
     let temp_dir = TempDir::new().unwrap();
     let file_path = temp_dir.path().join("compression.pb");
 
     let num_events = 1_000;
-    let events: Vec<ProtoEvent> = (0..num_events)
-        .map(|i| create_test_event(i, 1))
-        .collect();
+    let events: Vec<ProtoEvent> = (0..num_events).map(|i| create_test_event(i, 1)).collect();
 
     // Calculate JSON size
     use proton_beam_core::proto_to_json;
-    let json_size: usize = events
-        .iter()
-        .map(|e| proto_to_json(e).unwrap().len())
-        .sum();
+    let json_size: usize = events.iter().map(|e| proto_to_json(e).unwrap().len()).sum();
 
     // Write protobuf
     {
@@ -281,8 +305,63 @@ fn benchmark_compression_ratio() {
     println!("  Protobuf total size: {:.2} KB", pb_size as f64 / 1024.0);
     println!("  Compression ratio: {:.2}x", compression_ratio);
     println!("  Space saved: {:.1}%", space_saved);
-    println!("  Avg JSON event: {:.2} bytes", json_size as f64 / num_events as f64);
-    println!("  Avg Protobuf event: {:.2} bytes", pb_size as f64 / num_events as f64);
+    println!(
+        "  Avg JSON event: {:.2} bytes",
+        json_size as f64 / num_events as f64
+    );
+    println!(
+        "  Avg Protobuf event: {:.2} bytes",
+        pb_size as f64 / num_events as f64
+    );
+}
+
+fn benchmark_gzip_compression() {
+    println!("\n=== Benchmark: Gzip Compression ===");
+
+    use proton_beam_core::{create_gzip_encoder, proto_to_json};
+
+    let temp_dir = TempDir::new().unwrap();
+    let pb_path = temp_dir.path().join("events.pb");
+    let gz_path = temp_dir.path().join("events.pb.gz");
+
+    let num_events = 1_000;
+    let events: Vec<ProtoEvent> = (0..num_events).map(|i| create_test_event(i, 1)).collect();
+
+    // Calculate JSON size
+    let json_size: usize = events.iter().map(|e| proto_to_json(e).unwrap().len()).sum();
+
+    // Write uncompressed protobuf
+    {
+        let file = File::create(&pb_path).unwrap();
+        let mut writer = BufWriter::new(file);
+        write_events_delimited(&mut writer, &events).unwrap();
+    }
+
+    // Write gzip compressed protobuf
+    {
+        let file = File::create(&gz_path).unwrap();
+        let gz = create_gzip_encoder(file);
+        let mut writer = BufWriter::new(gz);
+        write_events_delimited(&mut writer, &events).unwrap();
+    }
+
+    let pb_size = std::fs::metadata(&pb_path).unwrap().len() as usize;
+    let gz_size = std::fs::metadata(&gz_path).unwrap().len() as usize;
+    let pb_vs_json = json_size as f64 / pb_size as f64;
+    let gz_vs_pb = pb_size as f64 / gz_size as f64;
+    let gz_vs_json = json_size as f64 / gz_size as f64;
+
+    println!("  Events analyzed: {}", num_events);
+    println!("  JSON total size: {:.2} KB", json_size as f64 / 1024.0);
+    println!("  Protobuf size: {:.2} KB", pb_size as f64 / 1024.0);
+    println!("  Gzip'd Protobuf size: {:.2} KB", gz_size as f64 / 1024.0);
+    println!("  Protobuf vs JSON: {:.2}x smaller", pb_vs_json);
+    println!("  Gzip'd vs Protobuf: {:.2}x smaller", gz_vs_pb);
+    println!("  Gzip'd vs JSON: {:.2}x smaller (combined)", gz_vs_json);
+    println!(
+        "  Space saved vs JSON: {:.1}%",
+        ((json_size - gz_size) as f64 / json_size as f64) * 100.0
+    );
 }
 
 fn main() {
@@ -297,7 +376,7 @@ fn main() {
     benchmark_write_large_events();
     benchmark_round_trip_storage();
     benchmark_compression_ratio();
+    benchmark_gzip_compression();
 
     println!("\n✅ Storage benchmarks complete!");
 }
-

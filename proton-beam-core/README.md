@@ -178,6 +178,34 @@ for result in read_events_delimited(file) {
 }
 ```
 
+### Write/Read with Gzip Compression
+
+```rust
+use proton_beam_core::{
+    create_gzip_encoder, create_gzip_decoder,
+    write_event_delimited, read_events_delimited, ProtoEvent
+};
+use std::fs::File;
+use std::io::BufWriter;
+
+// Write compressed
+let file = File::create("events.pb.gz")?;
+let gz = create_gzip_encoder(file);
+let mut writer = BufWriter::new(gz);
+write_event_delimited(&mut writer, &event)?;
+drop(writer); // Ensure gzip stream is finished
+
+// Read compressed
+let file = File::open("events.pb.gz")?;
+let gz = create_gzip_decoder(file);
+for result in read_events_delimited(gz) {
+    let event = result?;
+    println!("Event ID: {}", event.id);
+}
+```
+
+The CLI automatically uses gzip compression for all `.pb.gz` output files, providing ~65-97% space savings compared to JSON.
+
 ## API Design Decisions
 
 ### Why `ProtoEvent` instead of `Event`?

@@ -29,6 +29,9 @@ thiserror = { workspace = true }
 # Database
 rusqlite = { workspace = true }
 
+# Compression
+flate2 = { workspace = true }
+
 [build-dependencies]
 prost-build = { workspace = true }
 

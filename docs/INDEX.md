@@ -253,7 +253,7 @@ Automatically finding and connecting to new Nostr relays based on relay hints in
 ### Output
 - `.pb` - Protobuf binary files (length-delimited)
 - `errors.jsonl` - Malformed events with error reasons
-- `.index.db` - SQLite database for event index
+- `index.db` - SQLite database for event index
 
 ### Configuration
 - `.toml` - TOML configuration files

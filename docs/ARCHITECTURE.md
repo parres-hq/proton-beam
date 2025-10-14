@@ -94,15 +94,16 @@
 │  │  Date-based File Writer     │                          │
 │  │  - Group by created_at      │                          │
 │  │  - Length-delimited format  │                          │
-│  │  - YYYY_MM_DD.pb files      │                          │
+│  │  - YYYY_MM_DD.pb.gz files   │                          │
+│  │  - Gzip compressed          │                          │
 │  └──────┬──────────────────────┘                          │
 │         ▼                                                  │
-│  ┌─────────────────┐                                      │
-│  │  Output Files:  │                                      │
-│  │  2025_10_13.pb  │                                      │
-│  │  2025_10_14.pb  │                                      │
-│  │  ...            │                                      │
-│  └─────────────────┘                                      │
+│  ┌──────────────────────┐                                 │
+│  │  Output Files:       │                                 │
+│  │  2025_10_13.pb.gz    │                                 │
+│  │  2025_10_14.pb.gz    │                                 │
+│  │  ...                 │                                 │
+│  └──────────────────────┘                                 │
 │                                                            │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -210,7 +211,7 @@
 │  │  ┌────────────────────────────────────────────┐         │         │
 │  │  │  Date-based Router                         │         │         │
 │  │  │  - Group by created_at timestamp           │         │         │
-│  │  │  - Map to YYYY_MM_DD.pb files              │         │         │
+│  │  │  - Map to YYYY_MM_DD.pb.gz files           │         │         │
 │  │  └────────────┬───────────────────────────────┘         │         │
 │  │               ▼                                          │         │
 │  │  ┌────────────────────────────────────────────┐         │         │
@@ -298,9 +299,9 @@ Multiple Relays (WebSocket)
        ▼ (batch trigger: 500 events OR 30 seconds)
   [Batch Processor]
        │
-       ├─► [File Writer] ──► YYYY_MM_DD.pb files
+       ├─► [File Writer] ──► YYYY_MM_DD.pb.gz files (gzip compressed)
        │
-       └─► [Index Updater] ──► .index.db
+       └─► [Index Updater] ──► index.db
 ```
 
 ## Storage Architecture
@@ -330,7 +331,7 @@ Output Directory Structure:
 │  │   │ ...                    │    │
 │  │   └────────────────────────┘    │
 │  │                                 │
-│  └── .index.db                     │ ◄── SQLite index
+│  └── index.db                      │ ◄── SQLite index
 │      ┌────────────────────────┐    │
 │      │ events table:          │    │
 │      │  - id (PK)             │    │     Event lookup index
@@ -419,7 +420,7 @@ File Structure:
 **Why:** Fast lookups, ACID properties, no external dependencies.
 
 - O(1) event existence check
-- Enables future querying without scanning .pb files
+- Enables future querying without scanning .pb.gz files
 - Small overhead (~1-2% of event data size)
 
 ### 4. Validation with nostr-sdk
@@ -474,9 +475,9 @@ proton-beam-daemon
     │ Query Engine │
     └──────┬───────┘
            │
-           ├─► .index.db (fast queries)
+           ├─► index.db (fast queries)
            │
-           └─► YYYY_MM_DD.pb files (full events)
+           └─► YYYY_MM_DD.pb.gz files (full events, gzip compressed)
 ```
 
 ### V3.0: Distributed Storage
@@ -510,8 +511,9 @@ proton-beam-daemon
   - Disk I/O (mitigated by batching)
 
 ### Storage
-- **Size**: ~10-25% smaller than minified JSON
-- **Compression**: ~50-70% with gzip (future feature)
+- **Size**: ~10-25% smaller than minified JSON (raw protobuf)
+- **Compression**: Gzip compression enabled by default (~65-97% space savings vs JSON depending on data patterns)
+- **Combined**: ~3-40x smaller than JSON (protobuf + gzip)
 - **Index**: ~1-2% of event data size
 
 ---

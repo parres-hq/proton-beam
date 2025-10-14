@@ -35,6 +35,9 @@ chrono = { workspace = true }
 # JSON handling
 serde_json = { workspace = true }
 
+# Compression
+flate2 = { workspace = true }
+
 [dev-dependencies]
 tempfile = { workspace = true }
 assert_cmd = "2.0"

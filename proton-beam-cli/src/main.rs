@@ -34,7 +34,7 @@ enum Commands {
         #[arg(short, long, default_value = "./pb_data")]
         output_dir: PathBuf,
 
-        /// Path to SQLite index database (defaults to OUTPUT_DIR/.index.db)
+        /// Path to SQLite index database (defaults to OUTPUT_DIR/index.db)
         #[arg(long)]
         index_path: Option<PathBuf>,
 
@@ -114,7 +114,7 @@ fn main() -> Result<()> {
             init_logging(verbose);
 
             // Determine index path
-            let index_path = index_path.unwrap_or_else(|| output_dir.join(".index.db"));
+            let index_path = index_path.unwrap_or_else(|| output_dir.join("index.db"));
 
             info!("Starting Proton Beam CLI");
             info!("Input: {}", input);
@@ -127,7 +127,14 @@ fn main() -> Result<()> {
             info!("Batch size: {}", batch_size);
 
             // Run conversion
-            convert_events(&input, &output_dir, &index_path, !no_validate, batch_size, !no_progress)?;
+            convert_events(
+                &input,
+                &output_dir,
+                &index_path,
+                !no_validate,
+                batch_size,
+                !no_progress,
+            )?;
         }
     }
 
@@ -234,7 +241,11 @@ fn convert_events(
         let in_buffer = index_buffer.iter().any(|(e, _)| e.id == event.id);
 
         if in_index || in_buffer {
-            info!("Skipping duplicate event: {} (line {})", event.id, line_num + 1);
+            info!(
+                "Skipping duplicate event: {} (line {})",
+                event.id,
+                line_num + 1
+            );
             stats.duplicates += 1;
             continue;
         }
@@ -253,7 +264,7 @@ fn convert_events(
 
         // Get the date string for file path
         let date_str = storage.get_date_string_for_event(&event)?;
-        let file_name = format!("{}.pb", date_str);
+        let file_name = format!("{}.pb.gz", date_str);
 
         // Store the event
         match storage.store_event(event.clone()) {
@@ -265,10 +276,11 @@ fn convert_events(
 
                 // Flush index buffer when it reaches batch size
                 if index_buffer.len() >= batch_size {
-                    let batch_refs: Vec<_> = index_buffer.iter()
-                        .map(|(e, f)| (e, f.as_str()))
-                        .collect();
-                    index.insert_batch(&batch_refs).context("Failed to batch insert to index")?;
+                    let batch_refs: Vec<_> =
+                        index_buffer.iter().map(|(e, f)| (e, f.as_str())).collect();
+                    index
+                        .insert_batch(&batch_refs)
+                        .context("Failed to batch insert to index")?;
                     index_buffer.clear();
                 }
             }
@@ -289,10 +301,10 @@ fn convert_events(
 
     // Flush any remaining index entries
     if !index_buffer.is_empty() {
-        let batch_refs: Vec<_> = index_buffer.iter()
-            .map(|(e, f)| (e, f.as_str()))
-            .collect();
-        index.insert_batch(&batch_refs).context("Failed to flush final index batch")?;
+        let batch_refs: Vec<_> = index_buffer.iter().map(|(e, f)| (e, f.as_str())).collect();
+        index
+            .insert_batch(&batch_refs)
+            .context("Failed to flush final index batch")?;
     }
 
     // Clean up progress bar

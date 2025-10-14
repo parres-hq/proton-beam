@@ -47,7 +47,10 @@ fn benchmark_json_to_proto_small() {
     println!("  Conversions: {}", num_conversions);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Conversions/sec: {:.0}", conversions_per_sec);
-    println!("  Avg time per conversion: {:.2}µs", duration.as_micros() as f64 / num_conversions as f64);
+    println!(
+        "  Avg time per conversion: {:.2}µs",
+        duration.as_micros() as f64 / num_conversions as f64
+    );
 }
 
 fn benchmark_json_to_proto_large() {
@@ -66,7 +69,10 @@ fn benchmark_json_to_proto_large() {
     println!("  Conversions: {}", num_conversions);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Conversions/sec: {:.0}", conversions_per_sec);
-    println!("  Avg time per conversion: {:.2}µs", duration.as_micros() as f64 / num_conversions as f64);
+    println!(
+        "  Avg time per conversion: {:.2}µs",
+        duration.as_micros() as f64 / num_conversions as f64
+    );
 }
 
 fn benchmark_proto_to_json() {
@@ -86,7 +92,10 @@ fn benchmark_proto_to_json() {
     println!("  Conversions: {}", num_conversions);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Conversions/sec: {:.0}", conversions_per_sec);
-    println!("  Avg time per conversion: {:.2}µs", duration.as_micros() as f64 / num_conversions as f64);
+    println!(
+        "  Avg time per conversion: {:.2}µs",
+        duration.as_micros() as f64 / num_conversions as f64
+    );
 }
 
 fn benchmark_round_trip() {
@@ -106,7 +115,10 @@ fn benchmark_round_trip() {
     println!("  Round trips: {}", num_conversions);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Round trips/sec: {:.0}", conversions_per_sec);
-    println!("  Avg time per round trip: {:.2}µs", duration.as_micros() as f64 / num_conversions as f64);
+    println!(
+        "  Avg time per round trip: {:.2}µs",
+        duration.as_micros() as f64 / num_conversions as f64
+    );
 }
 
 fn benchmark_try_from_trait() {
@@ -125,7 +137,10 @@ fn benchmark_try_from_trait() {
     println!("  Conversions: {}", num_conversions);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Conversions/sec: {:.0}", conversions_per_sec);
-    println!("  Avg time per conversion: {:.2}µs", duration.as_micros() as f64 / num_conversions as f64);
+    println!(
+        "  Avg time per conversion: {:.2}µs",
+        duration.as_micros() as f64 / num_conversions as f64
+    );
 }
 
 fn benchmark_batch_conversion() {
@@ -145,7 +160,10 @@ fn benchmark_batch_conversion() {
     println!("  Events converted: {}", events.len());
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Conversions/sec: {:.0}", conversions_per_sec);
-    println!("  Avg time per event: {:.2}µs", duration.as_micros() as f64 / events.len() as f64);
+    println!(
+        "  Avg time per event: {:.2}µs",
+        duration.as_micros() as f64 / events.len() as f64
+    );
 }
 
 fn main() {
@@ -162,4 +180,3 @@ fn main() {
 
     println!("\n✅ Conversion benchmarks complete!");
 }
-

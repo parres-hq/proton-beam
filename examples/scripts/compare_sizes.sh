@@ -56,8 +56,8 @@ rm -rf "$OUTPUT_DIR"
   --output-dir "$OUTPUT_DIR" \
   --no-progress > /dev/null 2>&1
 
-# Calculate protobuf size
-PB_SIZE=$(find "$OUTPUT_DIR" -name "*.pb" -type f -exec wc -c {} + | \
+# Calculate protobuf size (gzip compressed)
+PB_SIZE=$(find "$OUTPUT_DIR" -name "*.pb.gz" -type f -exec wc -c {} + | \
   awk '{sum+=$1} END {print sum}')
 
 # Ensure PB_SIZE is not zero

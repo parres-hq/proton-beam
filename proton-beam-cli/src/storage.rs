@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use proton_beam_core::{ProtoEvent, write_event_delimited};
+use proton_beam_core::{ProtoEvent, create_gzip_encoder, write_event_delimited};
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -83,7 +83,7 @@ impl StorageManager {
         };
 
         // Open the output file for this date (append mode)
-        let filename = format!("{}.pb", date_str);
+        let filename = format!("{}.pb.gz", date_str);
         let output_path = self.output_dir.join(&filename);
 
         let file = OpenOptions::new()
@@ -92,14 +92,16 @@ impl StorageManager {
             .open(&output_path)
             .context(format!("Failed to open output file: {}", filename))?;
 
-        let mut writer = BufWriter::new(file);
+        // Wrap with gzip compression
+        let gz = create_gzip_encoder(file);
+        let mut writer = BufWriter::new(gz);
 
         // Write all events in the buffer
         for event in buffer {
             write_event_delimited(&mut writer, &event).context("Failed to write event")?;
         }
 
-        // Ensure all data is written
+        // Ensure all data is written (this also finishes the gzip stream)
         writer.flush().context("Failed to flush writer")?;
 
         Ok(())
@@ -196,8 +198,8 @@ mod tests {
         // Flush to disk
         manager.flush().unwrap();
 
-        // Check that the file was created
-        let pb_file = temp_dir.path().join("2025_09_27.pb");
+        // Check that the compressed file was created
+        let pb_file = temp_dir.path().join("2025_09_27.pb.gz");
         assert!(pb_file.exists());
     }
 

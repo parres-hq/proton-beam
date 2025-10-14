@@ -2,7 +2,12 @@ use proton_beam_core::{EventIndex, ProtoEventBuilder};
 use std::time::Instant;
 use tempfile::TempDir;
 
-fn create_test_event(id: &str, kind: i32, pubkey: &str, created_at: i64) -> proton_beam_core::ProtoEvent {
+fn create_test_event(
+    id: &str,
+    kind: i32,
+    pubkey: &str,
+    created_at: i64,
+) -> proton_beam_core::ProtoEvent {
     ProtoEventBuilder::new()
         .id(id)
         .kind(kind)
@@ -89,12 +94,14 @@ fn benchmark_contains() {
     // Insert events
     let num_events = 10_000;
     let events: Vec<_> = (0..num_events)
-        .map(|i| create_test_event(
-            &format!("{:064x}", i),
-            1,
-            "pubkey_bench",
-            1234567890 + i as i64,
-        ))
+        .map(|i| {
+            create_test_event(
+                &format!("{:064x}", i),
+                1,
+                "pubkey_bench",
+                1234567890 + i as i64,
+            )
+        })
         .collect();
 
     let batch_refs: Vec<_> = events.iter().map(|e| (e, "bench.pb")).collect();
@@ -128,12 +135,14 @@ fn benchmark_query_by_kind() {
     // Insert events with different kinds
     let num_events = 10_000;
     let events: Vec<_> = (0..num_events)
-        .map(|i| create_test_event(
-            &format!("{:064x}", i),
-            i % 10, // 10 different kinds
-            "pubkey_bench",
-            1234567890 + i as i64,
-        ))
+        .map(|i| {
+            create_test_event(
+                &format!("{:064x}", i),
+                i % 10, // 10 different kinds
+                "pubkey_bench",
+                1234567890 + i as i64,
+            )
+        })
         .collect();
 
     let batch_refs: Vec<_> = events.iter().map(|e| (e, "bench.pb")).collect();
@@ -175,7 +184,8 @@ fn benchmark_stats() {
                     &format!("{:064x}", i),
                     (i % 10) as i32,
                     &format!("pubkey_{}", i % 100),
-                    1234567890 + i as i64);
+                    1234567890 + i as i64,
+                );
                 (event, format!("file_{}.pb", i / 1000))
             })
             .collect();
@@ -217,4 +227,3 @@ fn main() {
 
     println!("\n✅ Benchmarks complete!");
 }
-

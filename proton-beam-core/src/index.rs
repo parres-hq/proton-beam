@@ -13,7 +13,7 @@
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create or open an index
-//! let mut index = EventIndex::new(Path::new("./pb_data/.index.db"))?;
+//! let mut index = EventIndex::new(Path::new("./pb_data/index.db"))?;
 //!
 //! // Check if an event already exists
 //! if index.contains("event_id_123")? {
@@ -40,7 +40,7 @@
 //! ```
 
 use crate::{Error, ProtoEvent, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 
 /// SQLite-based event index for deduplication and queries
@@ -96,7 +96,7 @@ impl EventIndex {
     /// use proton_beam_core::EventIndex;
     /// use std::path::Path;
     ///
-    /// let index = EventIndex::new(Path::new("./pb_data/.index.db"))?;
+    /// let index = EventIndex::new(Path::new("./pb_data/index.db"))?;
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn new(db_path: &Path) -> Result<Self> {
@@ -146,7 +146,7 @@ impl EventIndex {
     /// # use proton_beam_core::EventIndex;
     /// # use std::path::Path;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let index = EventIndex::new(Path::new("./pb_data/.index.db"))?;
+    /// # let index = EventIndex::new(Path::new("./pb_data/index.db"))?;
     /// if index.contains("event_id_123")? {
     ///     println!("Event already exists");
     /// }
@@ -181,7 +181,7 @@ impl EventIndex {
     /// # use proton_beam_core::{EventIndex, ProtoEvent};
     /// # use std::path::Path;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut index = EventIndex::new(Path::new("./pb_data/.index.db"))?;
+    /// # let mut index = EventIndex::new(Path::new("./pb_data/index.db"))?;
     /// # let event = ProtoEvent {
     /// #     id: "event_id_123".to_string(),
     /// #     kind: 1,
@@ -233,7 +233,7 @@ impl EventIndex {
     /// # use proton_beam_core::{EventIndex, ProtoEvent};
     /// # use std::path::Path;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let mut index = EventIndex::new(Path::new("./pb_data/.index.db"))?;
+    /// # let mut index = EventIndex::new(Path::new("./pb_data/index.db"))?;
     /// # let event1 = ProtoEvent {
     /// #     id: "event1".to_string(),
     /// #     kind: 1,
@@ -252,10 +252,7 @@ impl EventIndex {
     /// #     tags: vec![],
     /// #     sig: "sig2".to_string(),
     /// # };
-    /// let events = vec![
-    ///     (&event1, "2025_10_13.pb"),
-    ///     (&event2, "2025_10_13.pb"),
-    /// ];
+    /// let events = vec![(&event1, "2025_10_13.pb"), (&event2, "2025_10_13.pb")];
     /// index.insert_batch(&events)?;
     /// # Ok(())
     /// # }
@@ -308,7 +305,7 @@ impl EventIndex {
     /// # use proton_beam_core::EventIndex;
     /// # use std::path::Path;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let index = EventIndex::new(Path::new("./pb_data/.index.db"))?;
+    /// # let index = EventIndex::new(Path::new("./pb_data/index.db"))?;
     /// let stats = index.stats()?;
     /// println!("Total events: {}", stats.total_events);
     /// println!("Unique files: {}", stats.unique_files);
@@ -324,20 +321,16 @@ impl EventIndex {
 
         let unique_files: u64 = self
             .conn
-            .query_row(
-                "SELECT COUNT(DISTINCT file_path) FROM events",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(DISTINCT file_path) FROM events", [], |row| {
+                row.get(0)
+            })
             .map_err(|e| Error::InvalidEvent(format!("Failed to query unique files: {}", e)))?;
 
         let unique_pubkeys: u64 = self
             .conn
-            .query_row(
-                "SELECT COUNT(DISTINCT pubkey) FROM events",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(DISTINCT pubkey) FROM events", [], |row| {
+                row.get(0)
+            })
             .map_err(|e| Error::InvalidEvent(format!("Failed to query unique pubkeys: {}", e)))?;
 
         let earliest_event: Option<i64> = self
@@ -375,7 +368,7 @@ impl EventIndex {
     /// # use proton_beam_core::EventIndex;
     /// # use std::path::Path;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let index = EventIndex::new(Path::new("./pb_data/.index.db"))?;
+    /// # let index = EventIndex::new(Path::new("./pb_data/index.db"))?;
     /// let text_notes = index.query_by_kind(1)?;
     /// println!("Found {} text notes", text_notes.len());
     /// # Ok(())
@@ -420,7 +413,7 @@ impl EventIndex {
     /// # use proton_beam_core::EventIndex;
     /// # use std::path::Path;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let index = EventIndex::new(Path::new("./pb_data/.index.db"))?;
+    /// # let index = EventIndex::new(Path::new("./pb_data/index.db"))?;
     /// let events = index.query_by_pubkey("pubkey_abc")?;
     /// println!("Found {} events from this pubkey", events.len());
     /// # Ok(())
@@ -466,7 +459,7 @@ impl EventIndex {
     /// # use proton_beam_core::EventIndex;
     /// # use std::path::Path;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let index = EventIndex::new(Path::new("./pb_data/.index.db"))?;
+    /// # let index = EventIndex::new(Path::new("./pb_data/index.db"))?;
     /// let events = index.query_by_date_range(1697000000, 1697086400)?;
     /// println!("Found {} events in range", events.len());
     /// # Ok(())
@@ -513,7 +506,7 @@ impl EventIndex {
     /// # use proton_beam_core::EventIndex;
     /// # use std::path::Path;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let index = EventIndex::new(Path::new("./pb_data/.index.db"))?;
+    /// # let index = EventIndex::new(Path::new("./pb_data/index.db"))?;
     /// if let Some(record) = index.get("event_id_123")? {
     ///     println!("Event found in file: {}", record.file_path);
     /// }
@@ -749,4 +742,3 @@ mod tests {
         }
     }
 }
-

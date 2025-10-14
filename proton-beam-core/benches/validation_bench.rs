@@ -1,4 +1,6 @@
-use proton_beam_core::{ProtoEvent, ProtoEventBuilder, validate_event, validation::validate_basic_fields};
+use proton_beam_core::{
+    ProtoEvent, ProtoEventBuilder, validate_event, validation::validate_basic_fields,
+};
 use std::time::Instant;
 
 fn create_mock_event() -> ProtoEvent {
@@ -29,7 +31,10 @@ fn benchmark_basic_validation() {
     println!("  Validations: {}", num_validations);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Validations/sec: {:.0}", validations_per_sec);
-    println!("  Avg time per validation: {:.2}ns", duration.as_nanos() as f64 / num_validations as f64);
+    println!(
+        "  Avg time per validation: {:.2}ns",
+        duration.as_nanos() as f64 / num_validations as f64
+    );
 }
 
 fn benchmark_full_validation() {
@@ -51,7 +56,10 @@ fn benchmark_full_validation() {
     println!("  Validations: {}", num_validations);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Validations/sec: {:.0}", validations_per_sec);
-    println!("  Avg time per validation: {:.2}µs", duration.as_micros() as f64 / num_validations as f64);
+    println!(
+        "  Avg time per validation: {:.2}µs",
+        duration.as_micros() as f64 / num_validations as f64
+    );
 }
 
 fn benchmark_validation_with_tags() {
@@ -85,7 +93,10 @@ fn benchmark_validation_with_tags() {
     println!("  Tag count: {}", event.tags.len());
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Validations/sec: {:.0}", validations_per_sec);
-    println!("  Avg time per validation: {:.2}ns", duration.as_nanos() as f64 / num_validations as f64);
+    println!(
+        "  Avg time per validation: {:.2}ns",
+        duration.as_nanos() as f64 / num_validations as f64
+    );
 }
 
 fn benchmark_invalid_detection() {
@@ -140,7 +151,10 @@ fn benchmark_invalid_detection() {
     println!("  Total checks: {}", total_checks);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Checks/sec: {:.0}", validations_per_sec);
-    println!("  Avg time per check: {:.2}ns", duration.as_nanos() as f64 / total_checks as f64);
+    println!(
+        "  Avg time per check: {:.2}ns",
+        duration.as_nanos() as f64 / total_checks as f64
+    );
 }
 
 fn benchmark_batch_validation() {
@@ -173,7 +187,10 @@ fn benchmark_batch_validation() {
     println!("  Valid events: {}", valid_count);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Validations/sec: {:.0}", validations_per_sec);
-    println!("  Avg time per event: {:.2}µs", duration.as_micros() as f64 / events.len() as f64);
+    println!(
+        "  Avg time per event: {:.2}µs",
+        duration.as_micros() as f64 / events.len() as f64
+    );
 }
 
 fn main() {
@@ -189,4 +206,3 @@ fn main() {
 
     println!("\n✅ Validation benchmarks complete!");
 }
-

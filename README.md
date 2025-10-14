@@ -11,7 +11,7 @@ Proton Beam is a highly experimental (and will eventually be a high-performance)
 
 - 🚀 **High Performance**: Process 100+ events/second with validated signatures
 - 🔒 **Full Validation**: Verify event IDs (SHA-256) and Schnorr signatures
-- 📦 **Efficient Storage**: ~10-25% smaller than minified JSON
+- 📦 **Efficient Storage**: Protobuf + gzip compression (~3x smaller than JSON, 65%+ space savings)
 - 🗄️ **SQLite Index**: Fast event lookups and deduplication (~307K lookups/sec)
 - 🔄 **Real-time Processing**: Connect to multiple Nostr relays simultaneously
 - 🎯 **Smart Deduplication**: Events stored once across all relay sources
@@ -234,7 +234,7 @@ Events are stored in date-organized files using length-delimited protobuf:
 ├── 2025_10_13.pb       # All events from Oct 13
 ├── 2025_10_14.pb
 ├── errors.jsonl        # Malformed events
-└── .index.db           # SQLite index
+└── index.db            # SQLite index
 ```
 
 ## Contributing

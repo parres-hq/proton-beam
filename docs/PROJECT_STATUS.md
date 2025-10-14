@@ -242,7 +242,7 @@ impl EventIndex {
 - **Stats calculation**: ~247 calls/sec (on 100K event index)
 
 **CLI Integration:**
-- Index automatically created in output directory as `.index.db`
+- Index automatically created in output directory as `index.db`
 - Custom path supported via `--index-path` option
 - Deduplication enabled by default with info-level logging
 - Duplicate events do not cause exit failures

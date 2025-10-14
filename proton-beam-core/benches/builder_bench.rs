@@ -24,7 +24,10 @@ fn benchmark_builder_minimal() {
     println!("  Events built: {}", num_builds);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Builds/sec: {:.0}", builds_per_sec);
-    println!("  Avg time per build: {:.2}ns", duration.as_nanos() as f64 / num_builds as f64);
+    println!(
+        "  Avg time per build: {:.2}ns",
+        duration.as_nanos() as f64 / num_builds as f64
+    );
 }
 
 fn benchmark_builder_with_tags() {
@@ -54,7 +57,10 @@ fn benchmark_builder_with_tags() {
     println!("  Tags per event: 3");
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Builds/sec: {:.0}", builds_per_sec);
-    println!("  Avg time per build: {:.2}ns", duration.as_nanos() as f64 / num_builds as f64);
+    println!(
+        "  Avg time per build: {:.2}ns",
+        duration.as_nanos() as f64 / num_builds as f64
+    );
 }
 
 fn benchmark_builder_many_tags() {
@@ -88,7 +94,10 @@ fn benchmark_builder_many_tags() {
     println!("  Tags per event: 20");
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Builds/sec: {:.0}", builds_per_sec);
-    println!("  Avg time per build: {:.2}µs", duration.as_micros() as f64 / num_builds as f64);
+    println!(
+        "  Avg time per build: {:.2}µs",
+        duration.as_micros() as f64 / num_builds as f64
+    );
 }
 
 fn benchmark_direct_construction() {
@@ -115,7 +124,10 @@ fn benchmark_direct_construction() {
     println!("  Events constructed: {}", num_constructions);
     println!("  Time taken: {:.2}s", duration.as_secs_f64());
     println!("  Constructions/sec: {:.0}", constructions_per_sec);
-    println!("  Avg time per construction: {:.2}ns", duration.as_nanos() as f64 / num_constructions as f64);
+    println!(
+        "  Avg time per construction: {:.2}ns",
+        duration.as_nanos() as f64 / num_constructions as f64
+    );
 }
 
 fn benchmark_builder_vs_direct_overhead() {
@@ -152,14 +164,22 @@ fn benchmark_builder_vs_direct_overhead() {
     }
     let direct_duration = start_direct.elapsed();
 
-    let overhead_percent = ((builder_duration.as_nanos() as f64 - direct_duration.as_nanos() as f64)
-        / direct_duration.as_nanos() as f64) * 100.0;
+    let overhead_percent = ((builder_duration.as_nanos() as f64
+        - direct_duration.as_nanos() as f64)
+        / direct_duration.as_nanos() as f64)
+        * 100.0;
 
     println!("  Iterations: {}", num_iterations);
     println!("  Builder time: {:.2}s", builder_duration.as_secs_f64());
     println!("  Direct time: {:.2}s", direct_duration.as_secs_f64());
-    println!("  Builder avg: {:.2}ns", builder_duration.as_nanos() as f64 / num_iterations as f64);
-    println!("  Direct avg: {:.2}ns", direct_duration.as_nanos() as f64 / num_iterations as f64);
+    println!(
+        "  Builder avg: {:.2}ns",
+        builder_duration.as_nanos() as f64 / num_iterations as f64
+    );
+    println!(
+        "  Direct avg: {:.2}ns",
+        direct_duration.as_nanos() as f64 / num_iterations as f64
+    );
     println!("  Builder overhead: {:.1}%", overhead_percent);
 }
 
@@ -183,8 +203,12 @@ fn benchmark_tag_construction_methods() {
     // Method 2: add_tag_instance with Tag
     let start2 = Instant::now();
     for i in 0..num_iterations {
-        let tag1 = Tag { values: vec!["e".to_string(), "event_id".to_string()] };
-        let tag2 = Tag { values: vec!["p".to_string(), "pubkey_id".to_string()] };
+        let tag1 = Tag {
+            values: vec!["e".to_string(), "event_id".to_string()],
+        };
+        let tag2 = Tag {
+            values: vec!["p".to_string(), "pubkey_id".to_string()],
+        };
         let _ = ProtoEventBuilder::new()
             .id(format!("{:064x}", i))
             .pubkey("test")
@@ -198,8 +222,12 @@ fn benchmark_tag_construction_methods() {
     let start3 = Instant::now();
     for i in 0..num_iterations {
         let tags = vec![
-            Tag { values: vec!["e".to_string(), "event_id".to_string()] },
-            Tag { values: vec!["p".to_string(), "pubkey_id".to_string()] },
+            Tag {
+                values: vec!["e".to_string(), "event_id".to_string()],
+            },
+            Tag {
+                values: vec!["p".to_string(), "pubkey_id".to_string()],
+            },
         ];
         let _ = ProtoEventBuilder::new()
             .id(format!("{:064x}", i))
@@ -210,15 +238,21 @@ fn benchmark_tag_construction_methods() {
     let duration3 = start3.elapsed();
 
     println!("  Iterations: {}", num_iterations);
-    println!("  Method 1 (add_tag with vec![]): {:.2}s ({:.0} ops/s)",
+    println!(
+        "  Method 1 (add_tag with vec![]): {:.2}s ({:.0} ops/s)",
         duration1.as_secs_f64(),
-        num_iterations as f64 / duration1.as_secs_f64());
-    println!("  Method 2 (add_tag_instance): {:.2}s ({:.0} ops/s)",
+        num_iterations as f64 / duration1.as_secs_f64()
+    );
+    println!(
+        "  Method 2 (add_tag_instance): {:.2}s ({:.0} ops/s)",
         duration2.as_secs_f64(),
-        num_iterations as f64 / duration2.as_secs_f64());
-    println!("  Method 3 (tags() bulk): {:.2}s ({:.0} ops/s)",
+        num_iterations as f64 / duration2.as_secs_f64()
+    );
+    println!(
+        "  Method 3 (tags() bulk): {:.2}s ({:.0} ops/s)",
         duration3.as_secs_f64(),
-        num_iterations as f64 / duration3.as_secs_f64());
+        num_iterations as f64 / duration3.as_secs_f64()
+    );
 }
 
 fn benchmark_string_conversion_in_builder() {
@@ -253,15 +287,22 @@ fn benchmark_string_conversion_in_builder() {
     let string_duration = start_string.elapsed();
 
     println!("  Iterations: {}", num_iterations);
-    println!("  Using &str: {:.2}s ({:.0} ops/s)",
+    println!(
+        "  Using &str: {:.2}s ({:.0} ops/s)",
         str_duration.as_secs_f64(),
-        num_iterations as f64 / str_duration.as_secs_f64());
-    println!("  Using String: {:.2}s ({:.0} ops/s)",
+        num_iterations as f64 / str_duration.as_secs_f64()
+    );
+    println!(
+        "  Using String: {:.2}s ({:.0} ops/s)",
         string_duration.as_secs_f64(),
-        num_iterations as f64 / string_duration.as_secs_f64());
-    println!("  Difference: {:.1}%",
+        num_iterations as f64 / string_duration.as_secs_f64()
+    );
+    println!(
+        "  Difference: {:.1}%",
         ((string_duration.as_nanos() as f64 - str_duration.as_nanos() as f64)
-        / str_duration.as_nanos() as f64) * 100.0);
+            / str_duration.as_nanos() as f64)
+            * 100.0
+    );
 }
 
 fn main() {
@@ -279,4 +320,3 @@ fn main() {
 
     println!("\n✅ Builder benchmarks complete!");
 }
-

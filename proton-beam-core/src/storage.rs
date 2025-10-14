@@ -1,6 +1,9 @@
-//! Storage I/O for length-delimited protobuf events
+//! Storage I/O for length-delimited protobuf events with optional gzip compression
 
 use crate::{ProtoEvent, error::Result};
+use flate2::Compression;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
 use prost::Message;
 use std::io::{Read, Write};
 
@@ -125,6 +128,61 @@ impl<R: Read> Iterator for EventIterator<R> {
             Err(e) => Some(Err(e.into())),
         }
     }
+}
+
+/// Create a gzip encoder wrapper for writing compressed protobuf files
+///
+/// This wraps any writer with gzip compression. Use default compression level (6).
+///
+/// # Example
+///
+/// ```no_run
+/// use proton_beam_core::{ProtoEvent, create_gzip_encoder, write_event_delimited};
+/// use std::fs::File;
+/// use std::io::BufWriter;
+///
+/// let file = File::create("events.pb.gz")?;
+/// let mut gz = create_gzip_encoder(file);
+/// let mut writer = BufWriter::new(gz);
+///
+/// let event = ProtoEvent {
+///     id: "test".to_string(),
+///     pubkey: "test".to_string(),
+///     created_at: 123,
+///     kind: 1,
+///     tags: vec![],
+///     content: "Hello".to_string(),
+///     sig: "test".to_string(),
+/// };
+///
+/// write_event_delimited(&mut writer, &event)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn create_gzip_encoder<W: Write>(writer: W) -> GzEncoder<W> {
+    GzEncoder::new(writer, Compression::default())
+}
+
+/// Create a gzip decoder wrapper for reading compressed protobuf files
+///
+/// This wraps any reader with gzip decompression.
+///
+/// # Example
+///
+/// ```no_run
+/// use proton_beam_core::{create_gzip_decoder, read_events_delimited};
+/// use std::fs::File;
+///
+/// let file = File::open("events.pb.gz")?;
+/// let gz = create_gzip_decoder(file);
+///
+/// for result in read_events_delimited(gz) {
+///     let event = result?;
+///     println!("Event ID: {}", event.id);
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn create_gzip_decoder<R: Read>(reader: R) -> GzDecoder<R> {
+    GzDecoder::new(reader)
 }
 
 /// Read a varint from a reader
@@ -322,5 +380,112 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].id, "");
         assert_eq!(events[0].content, "");
+    }
+
+    #[test]
+    fn test_gzip_compression_single_event() {
+        let event = create_test_event("event1");
+
+        // Write with compression
+        let mut compressed = Vec::new();
+        {
+            let gz = create_gzip_encoder(&mut compressed);
+            let mut writer = std::io::BufWriter::new(gz);
+            write_event_delimited(&mut writer, &event).unwrap();
+        } // GzEncoder gets dropped and finishes here
+
+        // Read back with decompression to verify it works
+        let cursor = Cursor::new(&compressed);
+        let gz = create_gzip_decoder(cursor);
+        let mut events: Vec<ProtoEvent> = read_events_delimited(gz)
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+
+        assert_eq!(events.len(), 1);
+        let read_event = events.pop().unwrap();
+        assert_eq!(read_event.id, event.id);
+        assert_eq!(read_event.content, event.content);
+
+        // Note: For very small data, gzip overhead may make compressed data larger.
+        // The compression benefit shows with larger datasets (tested in test_compression_ratio).
+    }
+
+    #[test]
+    fn test_gzip_compression_multiple_events() {
+        let events = vec![
+            create_test_event("event1"),
+            create_test_event("event2"),
+            create_test_event("event3"),
+        ];
+
+        // Write with compression
+        let mut compressed = Vec::new();
+        {
+            let gz = create_gzip_encoder(&mut compressed);
+            let mut writer = std::io::BufWriter::new(gz);
+            write_events_delimited(&mut writer, &events).unwrap();
+        } // GzEncoder gets dropped and finishes here
+
+        // Read back with decompression
+        let cursor = Cursor::new(compressed);
+        let gz = create_gzip_decoder(cursor);
+        let read_events: Vec<ProtoEvent> = read_events_delimited(gz)
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+
+        assert_eq!(read_events.len(), 3);
+
+        for (original, read) in events.iter().zip(read_events.iter()) {
+            assert_eq!(original.id, read.id);
+            assert_eq!(original.content, read.content);
+        }
+    }
+
+    #[test]
+    fn test_compression_ratio() {
+        // Create a more realistic event with repeated patterns
+        let event = ProtoEvent {
+            id: "a".repeat(64),
+            pubkey: "b".repeat(64),
+            created_at: 1234567890,
+            kind: 1,
+            tags: vec![
+                Tag {
+                    values: vec!["e".to_string(), "c".repeat(64)],
+                },
+                Tag {
+                    values: vec!["p".to_string(), "d".repeat(64)],
+                },
+            ],
+            content: "Hello, Nostr! ".repeat(10),
+            sig: "e".repeat(128),
+        };
+
+        // Write uncompressed
+        let mut uncompressed = Vec::new();
+        write_event_delimited(&mut uncompressed, &event).unwrap();
+
+        // Write compressed
+        let mut compressed = Vec::new();
+        {
+            let gz = create_gzip_encoder(&mut compressed);
+            let mut writer = std::io::BufWriter::new(gz);
+            write_event_delimited(&mut writer, &event).unwrap();
+        }
+
+        let ratio = uncompressed.len() as f64 / compressed.len() as f64;
+        println!(
+            "Compression ratio: {:.2}x (uncompressed: {} bytes, compressed: {} bytes)",
+            ratio,
+            uncompressed.len(),
+            compressed.len()
+        );
+
+        // Gzip should provide meaningful compression on repetitive data
+        assert!(
+            ratio > 1.5,
+            "Expected compression ratio > 1.5x, got {:.2}x",
+            ratio
+        );
     }
 }
