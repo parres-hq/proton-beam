@@ -179,7 +179,7 @@ jobs:
 
   # Test on MSRV
   test-msrv:
-    name: Tests (MSRV ${{ env.MSRV }})
+    name: Tests (MSRV)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
