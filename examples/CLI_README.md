@@ -92,7 +92,7 @@ Events are organized by date:
 ./pb_data/
 ├── 2025_10_13.pb      # Events from Oct 13
 ├── 2025_10_14.pb      # Events from Oct 14
-└── errors.jsonl       # Failed conversions
+└── proton-beam.log    # Error and warning logs
 ```
 
 ---
@@ -171,7 +171,7 @@ chmod +x scripts/*.sh
 ./scripts/fast_conversion.sh my_events.jsonl
 
 # Analyze errors from previous conversion
-./scripts/analyze_errors.sh ./pb_data/errors.jsonl
+tail -n 50 ./pb_data/proton-beam.log  # View recent errors
 ```
 
 See **[scripts/README.md](scripts/README.md)** for detailed documentation.
@@ -340,16 +340,19 @@ sudo systemctl enable --now proton-backup.timer
 
 ```bash
 # Check if errors occurred
-[ -f ./pb_data/errors.jsonl ] && echo "Errors found" || echo "Success"
+[ -f ./pb_data/proton-beam.log ] && echo "Log file exists" || echo "No log file"
 
-# Count errors
-wc -l ./pb_data/errors.jsonl
+# View recent errors
+tail -n 50 ./pb_data/proton-beam.log
 
-# Analyze error types (requires jq)
-jq -r '.error' ./pb_data/errors.jsonl | sort | uniq -c | sort -rn
+# Count error lines
+grep -c "ERROR" ./pb_data/proton-beam.log
 
-# View first error
-head -n 1 ./pb_data/errors.jsonl | jq .
+# Analyze error types
+grep "ERROR" ./pb_data/proton-beam.log | cut -d' ' -f3 | sort | uniq -c | sort -rn
+
+# View specific line errors
+grep "line=" ./pb_data/proton-beam.log
 ```
 
 ### Common Issues
@@ -363,14 +366,19 @@ head -n 1 ./pb_data/errors.jsonl | jq .
 | **No progress bar showing** | Don't redirect stdout, or use `--no-progress` explicitly |
 | **All events failing** | Check JSON format, ensure one event per line |
 
-### Retry Failed Events
+### Analyzing Errors
 
 ```bash
-# Extract failed events
-jq -r '.original_json' ./pb_data/errors.jsonl > failed_events.jsonl
+# View all errors with line numbers
+grep "ERROR" ./pb_data/proton-beam.log
 
-# Retry without validation (if appropriate)
-proton-beam convert failed_events.jsonl --no-validate
+# Filter by error type
+grep "parse_error" ./pb_data/proton-beam.log
+grep "validation_error" ./pb_data/proton-beam.log
+grep "storage_error" ./pb_data/proton-beam.log
+
+# View errors from specific event IDs
+grep "id=" ./pb_data/proton-beam.log
 ```
 
 ### Exit Codes
@@ -399,7 +407,7 @@ which proton-beam
 
 ## Tips & Best Practices
 
-1. **Always check errors.jsonl** after conversion
+1. **Always check proton-beam.log** after conversion
 2. **Start with small datasets** when testing
 3. **Use appropriate batch sizes** for your use case
 4. **Validate when possible** - only skip for trusted data

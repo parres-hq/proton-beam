@@ -110,8 +110,12 @@ fn main() -> Result<()> {
             verbose,
             no_progress,
         } => {
-            // Initialize logging
-            init_logging(verbose);
+            // Create output directory first (needed for log file)
+            std::fs::create_dir_all(&output_dir)
+                .context("Failed to create output directory")?;
+
+            // Initialize logging (creates log file in output_dir)
+            init_logging(verbose, &output_dir);
 
             // Determine index path
             let index_path = index_path.unwrap_or_else(|| output_dir.join("index.db"));
@@ -141,8 +145,9 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn init_logging(verbose: bool) {
-    use tracing_subscriber::filter::LevelFilter;
+fn init_logging(verbose: bool, output_dir: &Path) {
+    use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
+    use std::fs::OpenOptions;
 
     let filter = if verbose {
         LevelFilter::DEBUG
@@ -150,10 +155,36 @@ fn init_logging(verbose: bool) {
         LevelFilter::INFO
     };
 
-    tracing_subscriber::fmt()
-        .with_max_level(filter)
+    // Create log file in output directory
+    let log_path = output_dir.join("proton-beam.log");
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .expect("Failed to open log file");
+
+    // Create a compact formatter for the log file (only errors and warnings)
+    let file_layer = fmt::layer()
+        .with_writer(std::sync::Arc::new(log_file))
+        .with_ansi(false)
         .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_line_number(false)
+        .with_file(false)
+        .compact()
+        .with_filter(EnvFilter::new("warn"));
+
+    // Create a layer for stderr (info and debug messages)
+    let stderr_layer = fmt::layer()
         .with_writer(std::io::stderr)
+        .with_target(false)
+        .with_filter(filter);
+
+    // Combine both layers
+    tracing_subscriber::registry()
+        .with(file_layer)
+        .with(stderr_layer)
         .init();
 }
 
@@ -230,7 +261,7 @@ fn convert_events(
             Ok(event) => event,
             Err(e) => {
                 warn!("Failed to parse event on line {}: {}", line_num + 1, e);
-                storage.log_error((line_num + 1) as u64, &line, &format!("parse_error: {}", e))?;
+                storage.log_error((line_num + 1) as u64, &format!("parse_error: {}", e), None);
                 stats.invalid_events += 1;
                 continue;
             }
@@ -255,9 +286,9 @@ fn convert_events(
             warn!("Failed to validate event on line {}: {}", line_num + 1, e);
             storage.log_error(
                 (line_num + 1) as u64,
-                &line,
                 &format!("validation_error: {}", e),
-            )?;
+                Some(&event.id),
+            );
             stats.invalid_events += 1;
             continue;
         }
@@ -288,9 +319,9 @@ fn convert_events(
                 error!("Failed to store event from line {}: {}", line_num + 1, e);
                 storage.log_error(
                     (line_num + 1) as u64,
-                    &line,
                     &format!("storage_error: {}", e),
-                )?;
+                    Some(&event.id),
+                );
                 stats.invalid_events += 1;
             }
         }

@@ -46,6 +46,19 @@ impl TryFrom<&str> for ProtoEvent {
     type Error = crate::error::Error;
 
     fn try_from(json: &str) -> Result<Self> {
+        // First, pre-validate the kind field before passing to nostr-sdk
+        // This prevents nostr-sdk from silently truncating invalid kind values
+        if let Some(kind) = serde_json::from_str::<serde_json::Value>(json)
+            .ok()
+            .and_then(|v| v.get("kind").and_then(|k| k.as_i64()))
+            .filter(|k| !(0..=65535).contains(k))
+        {
+            return Err(crate::error::Error::Conversion(format!(
+                "Event kind {} is out of valid range (0-65535). Nostr event kinds must fit in a u16.",
+                kind
+            )));
+        }
+
         // Parse JSON using nostr-sdk for proper validation
         let nostr_event: nostr_sdk::Event = serde_json::from_str(json)
             .map_err(|e| {
@@ -370,6 +383,51 @@ mod tests {
     fn test_invalid_json() {
         let result = json_to_proto("not valid json");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_kind_out_of_range_too_large() {
+        // Test that kind > 65535 is rejected with a clear error message
+        let json = r#"{"id": "6c6b55e939006d134889c0caba72d7c5dfd072f3394268ccd3c5eddc38c2f29a", "sig": "a409b1d05384da8478a445ecdd0a88d968c02d289326ac6e57ac60625defe56660308200ea6fb4d5d8860be42b6c4a7a05f3a73f82b0028f78c4f86fc4129173", "kind": 70202, "tags": [], "pubkey": "f79a5103bda9e48ed6aa468210453edce21227ca679fdcd2b33d8fe8adaa9408", "content": "test", "created_at": 1671557217}"#;
+
+        let result = json_to_proto(json);
+        assert!(result.is_err());
+
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("70202"));
+        assert!(err_msg.contains("out of valid range"));
+        assert!(err_msg.contains("0-65535"));
+    }
+
+    #[test]
+    fn test_kind_out_of_range_negative() {
+        // Test that negative kind is rejected
+        let json = r#"{"id": "6c6b55e939006d134889c0caba72d7c5dfd072f3394268ccd3c5eddc38c2f29a", "sig": "a409b1d05384da8478a445ecdd0a88d968c02d289326ac6e57ac60625defe56660308200ea6fb4d5d8860be42b6c4a7a05f3a73f82b0028f78c4f86fc4129173", "kind": -1, "tags": [], "pubkey": "f79a5103bda9e48ed6aa468210453edce21227ca679fdcd2b33d8fe8adaa9408", "content": "test", "created_at": 1671557217}"#;
+
+        let result = json_to_proto(json);
+        assert!(result.is_err());
+
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("out of valid range"));
+    }
+
+    #[test]
+    fn test_kind_max_valid() {
+        // Test that kind = 65535 is accepted
+        let json = format!(
+            r#"{{"id": "{}", "sig": "{}", "kind": 65535, "tags": [], "pubkey": "{}", "content": "test", "created_at": 1671557217}}"#,
+            "a".repeat(64),
+            "b".repeat(128),
+            "c".repeat(64)
+        );
+
+        // This will fail nostr-sdk validation (invalid signatures) but should pass kind range check
+        let result = json_to_proto(&json);
+        // It might fail for other reasons (bad signature), but NOT for kind range
+        if let Err(e) = result {
+            let err_msg = e.to_string();
+            assert!(!err_msg.contains("kind") || !err_msg.contains("out of valid range"));
+        }
     }
 
     #[test]

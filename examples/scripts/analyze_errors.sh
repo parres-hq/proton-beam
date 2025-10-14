@@ -1,72 +1,68 @@
 #!/bin/bash
 # Error Analysis Example
 #
-# This script analyzes conversion errors and provides detailed reports
+# This script analyzes conversion errors from the log file and provides detailed reports
 
 set -e
 
 # Configuration
-ERRORS_FILE="${1:-./pb_data/errors.jsonl}"
+LOG_FILE="${1:-./pb_data/proton-beam.log}"
 
 echo "🔍 Analyzing conversion errors..."
-echo "File: $ERRORS_FILE"
+echo "Log file: $LOG_FILE"
 echo ""
 
-# Check if errors file exists
-if [ ! -f "$ERRORS_FILE" ]; then
-  echo "✅ No errors file found - all conversions successful!"
+# Check if log file exists
+if [ ! -f "$LOG_FILE" ]; then
+  echo "✅ No log file found - all conversions successful!"
   exit 0
 fi
 
 # Check if file is empty
-if [ ! -s "$ERRORS_FILE" ]; then
-  echo "✅ Errors file is empty - all conversions successful!"
-  exit 0
-fi
-
-# Check if jq is available
-if ! command -v jq &> /dev/null; then
-  echo "⚠️  'jq' not found - showing basic statistics only"
-  echo ""
-  ERROR_COUNT=$(wc -l < "$ERRORS_FILE" | xargs)
-  echo "Total errors: $ERROR_COUNT"
-  echo ""
-  echo "Install jq for detailed analysis:"
-  echo "  brew install jq    # macOS"
-  echo "  apt install jq     # Debian/Ubuntu"
+if [ ! -s "$LOG_FILE" ]; then
+  echo "✅ Log file is empty!"
   exit 0
 fi
 
 # Total error count
-ERROR_COUNT=$(wc -l < "$ERRORS_FILE" | xargs)
+ERROR_COUNT=$(grep -c "ERROR" "$LOG_FILE" || echo "0")
+WARN_COUNT=$(grep -c "WARN" "$LOG_FILE" || echo "0")
+
 echo "📊 Error Statistics"
 echo "═══════════════════════════════════════"
-echo "Total errors: $ERROR_COUNT"
+echo "Total errors:   $ERROR_COUNT"
+echo "Total warnings: $WARN_COUNT"
 echo ""
+
+if [ "$ERROR_COUNT" -eq 0 ]; then
+  echo "✅ No errors found!"
+  exit 0
+fi
 
 # Error types breakdown
 echo "Error types:"
 echo "─────────────────────────────────────"
-jq -r '.error' "$ERRORS_FILE" | \
-  sed 's/:.*$//' | \
+grep "ERROR" "$LOG_FILE" | \
+  cut -d' ' -f3 | \
+  cut -d':' -f1 | \
   sort | uniq -c | sort -rn | \
   awk '{printf "  %-30s %s\n", $2, $1}'
 
 echo ""
 
-# Most common error messages (top 5)
-echo "Most common error messages:"
+# Show lines with errors
+echo "Lines with errors (top 10):"
 echo "─────────────────────────────────────"
-jq -r '.error' "$ERRORS_FILE" | \
-  sort | uniq -c | sort -rn | head -5 | \
-  awk '{$1=$1; printf "  [%d] %s\n", $1, substr($0, length($1)+2)}'
+grep "ERROR" "$LOG_FILE" | grep -o "line=[0-9]*" | \
+  cut -d'=' -f2 | sort -n | head -10 | \
+  awk '{printf "  Line %s\n", $1}'
 
 echo ""
 
-# Show first error example
-echo "Example error:"
+# Show first few error examples
+echo "Recent error examples:"
 echo "─────────────────────────────────────"
-head -n 1 "$ERRORS_FILE" | jq '.'
+grep "ERROR" "$LOG_FILE" | tail -5
 
 echo ""
 echo "═══════════════════════════════════════"
@@ -77,7 +73,7 @@ echo "💡 Suggestions:"
 echo ""
 
 # Check for parse errors
-PARSE_ERRORS=$(grep -c "parse_error" "$ERRORS_FILE" || true)
+PARSE_ERRORS=$(grep "parse_error" "$LOG_FILE" 2>/dev/null | wc -l | xargs)
 if [ "$PARSE_ERRORS" -gt 0 ]; then
   echo "  • $PARSE_ERRORS parse errors found"
   echo "    - Check if JSON is properly formatted"
@@ -86,7 +82,7 @@ if [ "$PARSE_ERRORS" -gt 0 ]; then
 fi
 
 # Check for validation errors
-VALIDATION_ERRORS=$(grep -c "validation_error" "$ERRORS_FILE" || true)
+VALIDATION_ERRORS=$(grep "validation_error" "$LOG_FILE" 2>/dev/null | wc -l | xargs)
 if [ "$VALIDATION_ERRORS" -gt 0 ]; then
   echo "  • $VALIDATION_ERRORS validation errors found"
   echo "    - Events may have invalid signatures or IDs"
@@ -94,10 +90,21 @@ if [ "$VALIDATION_ERRORS" -gt 0 ]; then
   echo ""
 fi
 
-# Offer to extract failed events
-echo "To retry failed events without validation:"
-echo "  jq -r '.original_json' $ERRORS_FILE > failed_events.jsonl"
-echo "  proton-beam convert failed_events.jsonl --no-validate"
+# Check for storage errors
+STORAGE_ERRORS=$(grep "storage_error" "$LOG_FILE" 2>/dev/null | wc -l | xargs)
+if [ "$STORAGE_ERRORS" -gt 0 ]; then
+  echo "  • $STORAGE_ERRORS storage errors found"
+  echo "    - Check disk space and write permissions"
+  echo "    - Verify output directory is writable"
+  echo ""
+fi
+
+echo "View full log:"
+echo "  tail -n 100 $LOG_FILE"
 echo ""
-echo "Note: This script is for analysis only and doesn't require proton-beam to be in PATH"
+echo "Filter by error type:"
+echo "  grep 'parse_error' $LOG_FILE"
+echo "  grep 'validation_error' $LOG_FILE"
+echo "  grep 'storage_error' $LOG_FILE"
+echo ""
 

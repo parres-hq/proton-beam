@@ -252,7 +252,7 @@ Automatically finding and connecting to new Nostr relays based on relay hints in
 
 ### Output
 - `.pb` - Protobuf binary files (length-delimited)
-- `errors.jsonl` - Malformed events with error reasons
+- `proton-beam.log` - Compact error and warning logs
 - `index.db` - SQLite database for event index
 
 ### Configuration
@@ -264,7 +264,7 @@ Automatically finding and connecting to new Nostr relays based on relay hints in
 1. Prepare `.jsonl` file with Nostr events
 2. Run: `proton-beam convert events.jsonl`
 3. Find output in `./pb_data/YYYY_MM_DD.pb` files
-4. Check `errors.jsonl` for any malformed events
+4. Check `proton-beam.log` for any errors or warnings
 
 ### Running the Daemon
 1. Create/customize `config.toml`

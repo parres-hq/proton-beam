@@ -128,7 +128,7 @@ Overall Progress:          ██████████░░░░░░░�
 - ✅ stdin input handler (pipe support)
 - ✅ Progress bars with `indicatif`
 - ✅ Date-based file organization (`YYYY_MM_DD.pb`)
-- ✅ Error file writing (`errors.jsonl`)
+- ✅ Error logging with `tracing` (`proton-beam.log`)
 - ✅ Batch write operations (configurable)
 - ✅ 5 unit tests + 13 integration tests (all passing)
 
@@ -167,7 +167,7 @@ proton-beam convert events.jsonl --no-validate
 ./pb_data/
 ├── 2025_10_13.pb        # Events from Oct 13, 2025
 ├── 2025_10_14.pb        # Events from Oct 14, 2025
-└── errors.jsonl         # Malformed events with error reasons
+└── proton-beam.log      # Compact error and warning logs
 ```
 
 ---

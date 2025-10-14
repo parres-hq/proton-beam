@@ -80,14 +80,14 @@
 │         │                 │                                │
 │         ▼                 ▼                                │
 │  ┌─────────────┐   ┌─────────────┐                        │
-│  │JSON→Protobuf│   │ Error Log   │                        │
-│  │Conversion   │   │Writer       │                        │
+│  │JSON→Protobuf│   │  Error Log  │                        │
+│  │Conversion   │   │  (tracing)  │                        │
 │  └──────┬──────┘   └──────┬──────┘                        │
 │         │                 │                                │
 │         ▼                 ▼                                │
-│  ┌─────────────┐   ┌─────────────┐                        │
-│  │Event Batcher│   │errors.jsonl │                        │
-│  │(500 events) │   └─────────────┘                        │
+│  ┌─────────────┐   ┌──────────────┐                       │
+│  │Event Batcher│   │proton-beam   │                       │
+│  │(500 events) │   │.log          │                       │
 │  └──────┬──────┘                                           │
 │         ▼                                                  │
 │  ┌─────────────────────────────┐                          │
@@ -249,10 +249,10 @@ Input File/Stream
    [Line Reader]
        │
        ▼
-  [JSON Parser] ──► (parse error) ──► errors.jsonl
+  [JSON Parser] ──► (parse error) ──► proton-beam.log
        │
        ▼
-  [Validator] ──► (validation error) ──► errors.jsonl
+  [Validator] ──► (validation error) ──► proton-beam.log
        │
        ▼
   [JSON→Proto Converter]
@@ -285,7 +285,7 @@ Multiple Relays (WebSocket)
   [Dedup Check] ──► (duplicate) ──► (discard)
        │
        ▼
-  [Validator] ──► (invalid) ──► errors.jsonl
+  [Validator] ──► (invalid) ──► proton-beam.log
        │
        ▼
   [Relay Discovery] ──► [Discovered Relays] ──► [Connection Pool]
@@ -323,11 +323,11 @@ Output Directory Structure:
 │  │                                 │
 │  ├── 2025_10_15.pb                 │ ◄── Events from Oct 15
 │  │                                 │
-│  ├── errors.jsonl                  │ ◄── Malformed events
+│  ├── proton-beam.log               │ ◄── Error and warning logs
 │  │   ┌────────────────────────┐    │
-│  │   │ {"error": "...",       │    │
-│  │   │  "event": {...},       │    │
-│  │   │  "timestamp": ...}     │    │     JSON Lines format
+│  │   │ 2025-10-14T13:48:12Z   │    │
+│  │   │  ERROR parse_error:... │    │     Compact log format
+│  │   │        line=1 id=abcd  │    │     (tracing subscriber)
 │  │   │ ...                    │    │
 │  │   └────────────────────────┘    │
 │  │                                 │

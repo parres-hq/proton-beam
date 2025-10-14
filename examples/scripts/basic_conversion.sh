@@ -45,11 +45,14 @@ echo ""
 echo "📁 Output files:"
 ls -lh "$OUTPUT_DIR"
 
-# Check for errors
-if [ -f "$OUTPUT_DIR/errors.jsonl" ]; then
-  echo ""
-  echo "⚠️  Some events failed conversion"
-  echo "Error count: $(wc -l < "$OUTPUT_DIR/errors.jsonl")"
-  echo "See: $OUTPUT_DIR/errors.jsonl"
+# Check for errors in log
+if [ -f "$OUTPUT_DIR/proton-beam.log" ]; then
+  ERROR_COUNT=$(grep -c "ERROR" "$OUTPUT_DIR/proton-beam.log" || echo "0")
+  if [ "$ERROR_COUNT" -gt 0 ]; then
+    echo ""
+    echo "⚠️  Some events failed conversion"
+    echo "Error count: $ERROR_COUNT"
+    echo "View errors: tail -n 50 $OUTPUT_DIR/proton-beam.log"
+  fi
 fi
 

@@ -94,9 +94,9 @@ fn test_convert_sample_events() {
 
     assert!(!pb_files.is_empty(), "No .pb.gz files were created");
 
-    // Check that errors.jsonl exists
-    let error_file = temp_dir.path().join("errors.jsonl");
-    assert!(error_file.exists(), "errors.jsonl was not created");
+    // Check that log file exists
+    let log_file = temp_dir.path().join("proton-beam.log");
+    assert!(log_file.exists(), "proton-beam.log was not created");
 }
 
 #[test]
@@ -186,13 +186,14 @@ fn test_error_logging() {
         .success()
         .stdout(predicate::str::contains("Invalid events:").and(predicate::str::contains("1")));
 
-    // Check that errors were logged
-    let error_file = output_dir.join("errors.jsonl");
-    assert!(error_file.exists(), "errors.jsonl should exist");
+    // Check that errors were logged to the log file (not JSONL)
+    let log_file = output_dir.join("proton-beam.log");
+    assert!(log_file.exists(), "proton-beam.log should exist");
 
-    // Verify the error file has content
-    let metadata = fs::metadata(&error_file).unwrap();
-    assert!(metadata.len() > 0, "Error file should not be empty");
+    // Verify the log file has content
+    let content = fs::read_to_string(&log_file).unwrap();
+    assert!(!content.is_empty(), "Log file should not be empty");
+    assert!(content.contains("parse_error"), "Log should contain parse error");
 }
 
 #[test]

@@ -105,19 +105,20 @@ Analyzes conversion errors and generates reports.
 
 **Examples:**
 ```bash
-./analyze_errors.sh                         # Uses ./pb_data/errors.jsonl
-./analyze_errors.sh custom/path/errors.jsonl
+./analyze_errors.sh                         # Uses ./pb_data/proton-beam.log
+./analyze_errors.sh custom/path/proton-beam.log
 ```
 
 **What it does:**
-- Counts total errors
+- Counts total errors and warnings
 - Breaks down by error type
-- Shows most common messages
+- Shows lines with errors
+- Shows recent error examples
 - Provides suggestions for fixes
 
 **Good for:** Debugging, understanding data quality issues
 
-**Requires:** `jq` for detailed analysis
+**Requires:** Standard Unix tools (`grep`, `cut`, `sort`, `awk`)
 
 ---
 

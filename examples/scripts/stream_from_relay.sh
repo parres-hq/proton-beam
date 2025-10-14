@@ -65,10 +65,16 @@ echo "📁 Output files:"
 ls -lh "$OUTPUT_DIR"
 
 # Show statistics
-if [ -f "$OUTPUT_DIR/errors.jsonl" ]; then
-  ERROR_COUNT=$(wc -l < "$OUTPUT_DIR/errors.jsonl")
-  echo ""
-  echo "⚠️  Errors: $ERROR_COUNT"
+if [ -f "$OUTPUT_DIR/proton-beam.log" ]; then
+  ERROR_COUNT=$(grep -c "ERROR" "$OUTPUT_DIR/proton-beam.log" || echo "0")
+  if [ "$ERROR_COUNT" -gt 0 ]; then
+    echo ""
+    echo "⚠️  Errors: $ERROR_COUNT"
+    echo "View errors: tail -n 50 $OUTPUT_DIR/proton-beam.log"
+  else
+    echo ""
+    echo "✨ No errors!"
+  fi
 else
   echo ""
   echo "✨ No errors!"

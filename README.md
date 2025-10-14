@@ -233,7 +233,7 @@ Events are stored in date-organized files using length-delimited protobuf:
 ./nostr_events/
 ├── 2025_10_13.pb       # All events from Oct 13
 ├── 2025_10_14.pb
-├── errors.jsonl        # Malformed events
+├── proton-beam.log     # Error and warning logs
 └── index.db            # SQLite index
 ```
 

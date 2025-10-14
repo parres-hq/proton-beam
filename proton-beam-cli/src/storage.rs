@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use proton_beam_core::{ProtoEvent, create_gzip_encoder, write_event_delimited};
-use serde_json::json;
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use tracing::error;
 
 /// Manages storage of events into date-organized protobuf files
 pub struct StorageManager {
@@ -14,9 +14,6 @@ pub struct StorageManager {
 
     // Map of date string (YYYY_MM_DD) to buffered events
     buffers: HashMap<String, Vec<ProtoEvent>>,
-
-    // Error log file
-    error_writer: BufWriter<File>,
 }
 
 impl StorageManager {
@@ -25,19 +22,10 @@ impl StorageManager {
         // Create the output directory if it doesn't exist
         std::fs::create_dir_all(output_dir).context("Failed to create output directory")?;
 
-        // Open or create the errors.jsonl file
-        let error_path = output_dir.join("errors.jsonl");
-        let error_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&error_path)
-            .context("Failed to open errors.jsonl")?;
-
         Ok(Self {
             output_dir: output_dir.to_path_buf(),
             batch_size,
             buffers: HashMap::new(),
-            error_writer: BufWriter::new(error_file),
         })
     }
 
@@ -115,31 +103,25 @@ impl StorageManager {
             self.flush_buffer(&date_str)?;
         }
 
-        // Flush error log
-        self.error_writer
-            .flush()
-            .context("Failed to flush error log")?;
-
         Ok(())
     }
 
-    /// Log an error to errors.jsonl
-    pub fn log_error(
-        &mut self,
-        line_num: u64,
-        original_json: &str,
-        error_reason: &str,
-    ) -> Result<()> {
-        let error_entry = json!({
-            "line": line_num,
-            "error": error_reason,
-            "original": original_json,
-        });
+    /// Log an error using tracing (compact format)
+    pub fn log_error(&self, line_num: u64, error_reason: &str, event_id: Option<&str>) {
+        // Truncate long error messages for compactness (keep first 100 chars)
+        let compact_reason = if error_reason.len() > 100 {
+            format!("{}...", &error_reason[..97])
+        } else {
+            error_reason.to_string()
+        };
 
-        writeln!(self.error_writer, "{}", error_entry)
-            .context("Failed to write error log entry")?;
-
-        Ok(())
+        if let Some(id) = event_id {
+            // Truncate ID to first 8 chars for compactness
+            let short_id = if id.len() > 8 { &id[..8] } else { id };
+            error!(line = line_num, id = short_id, "{}", compact_reason);
+        } else {
+            error!(line = line_num, "{}", compact_reason);
+        }
     }
 }
 
@@ -205,23 +187,21 @@ mod tests {
 
     #[test]
     fn test_error_logging() {
+        // Initialize test logging
+        let _ = tracing_subscriber::fmt()
+            .with_test_writer()
+            .try_init();
+
         let temp_dir = TempDir::new().unwrap();
-        let mut manager = StorageManager::new(temp_dir.path(), 10).unwrap();
+        let manager = StorageManager::new(temp_dir.path(), 10).unwrap();
 
-        manager
-            .log_error(
-                42,
-                r#"{"invalid": "json"}"#,
-                "parse_error: missing field 'id'",
-            )
-            .unwrap();
-        manager.flush().unwrap();
+        // Test error logging with event ID
+        manager.log_error(42, "parse_error: missing field 'id'", Some("abcd1234"));
 
-        let error_file = temp_dir.path().join("errors.jsonl");
-        assert!(error_file.exists());
+        // Test error logging without event ID
+        manager.log_error(43, "validation_error: invalid signature", None);
 
-        let content = std::fs::read_to_string(error_file).unwrap();
-        assert!(content.contains("\"line\":42"));
-        assert!(content.contains("parse_error"));
+        // The errors are now logged via tracing, not to a file
+        // This test just ensures the log_error method doesn't panic
     }
 }
