@@ -10,10 +10,10 @@ on:
       - 'Cargo.lock'
       - '.github/workflows/benchmarks.yml'
 
-  # Run on main branch to track baseline
+  # Run on master branch to track baseline
   push:
     branches:
-      - main
+      - master
     paths:
       - 'proton-beam-core/**'
       - 'proton-beam-cli/**'
@@ -118,7 +118,7 @@ jobs:
           if [ -f baseline-results/bench-baseline.txt ]; then
             echo "## Benchmark Comparison" > comparison.md
             echo "" >> comparison.md
-            echo "Comparing current PR against baseline (main branch)" >> comparison.md
+            echo "Comparing current PR against baseline (master branch)" >> comparison.md
             echo "" >> comparison.md
             echo '```diff' >> comparison.md
             diff baseline-results/bench-baseline.txt benchmark-results/bench-${{ github.sha }}.txt >> comparison.md || true
@@ -134,8 +134,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Save as baseline (main branch only)
-        if: github.ref == 'refs/heads/main'
+      - name: Save as baseline (master branch only)
+        if: github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-results-baseline
