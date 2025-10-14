@@ -21,7 +21,7 @@ impl From<nostr_sdk::Event> for ProtoEvent {
                 .tags
                 .iter()
                 .map(|tag| Tag {
-                    values: tag.as_vec().iter().map(|s| s.to_string()).collect(),
+                    values: tag.clone().to_vec().iter().map(|s| s.to_string()).collect(),
                 })
                 .collect(),
             content: nostr_event.content.clone(),

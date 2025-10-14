@@ -104,7 +104,7 @@ The `just precommit` command runs a comprehensive suite:
 2. **Format Check** - Ensure code is properly formatted (stable)
 3. **Documentation Check** - Verify docs build without warnings (stable)
 4. **Lint Check** - Run clippy with all feature combinations (stable)
-5. **MSRV Checks** - Repeat format, docs, and lint with MSRV (1.90.0)
+5. **MSRV Checks** - Repeat format, docs, and lint with MSRV (1.70.0)
 6. **Comprehensive Tests** - Run all tests with multiple feature configurations
 
 ## CI Workflow

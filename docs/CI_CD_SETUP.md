@@ -33,7 +33,7 @@ Both workflows are configured to run automatically and provide fast feedback on 
 | **Clippy** | Lint warnings and errors | ~3min | ✅ Yes |
 | **Docs** | Documentation builds | ~3min | ✅ Yes |
 | **Tests (Stable)** | Tests on Linux/macOS/Windows | ~10min | ✅ Yes |
-| **Tests (MSRV)** | Rust 1.70.0 compatibility | ~10min | ✅ Yes |
+| **Tests (MSRV)** | Rust 1.90.0 compatibility | ~10min | ✅ Yes |
 | **Build (Features)** | Different feature combinations | ~5min | ✅ Yes |
 | **Security Audit** | Dependency vulnerabilities | ~1min | ✅ Yes |
 
@@ -80,7 +80,7 @@ cargo doc --workspace --all-features --no-deps --document-private-items
 - **Note**: Excludes benchmarks (too slow for CI, run separately)
 - **Current status**: 92/92 tests passing
 
-#### 5. Tests (MSRV - Rust 1.70.0)
+#### 5. Tests (MSRV - Rust 1.90.0)
 - Ensures backward compatibility
 - Tests on minimum supported Rust version
 - Ubuntu only (for speed)
@@ -221,7 +221,7 @@ This runs:
 2. ✅ Format check
 3. ✅ Clippy (all features)
 4. ✅ Documentation
-5. ✅ MSRV check (Rust 1.70.0)
+5. ✅ MSRV check (Rust 1.90.0)
 6. ✅ All tests
 
 **Time**: ~5-10 minutes locally

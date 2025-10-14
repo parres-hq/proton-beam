@@ -44,7 +44,7 @@ This directory contains automated CI/CD workflows for Proton Beam.
      - `cargo test --workspace --no-default-features --all-targets`
 
 5. **Tests (MSRV)** (`test-msrv`)
-   - Tests on Minimum Supported Rust Version (1.70.0)
+   - Tests on Minimum Supported Rust Version (1.90.0)
    - Ensures backward compatibility
    - Runs on Ubuntu only
 
@@ -160,7 +160,7 @@ All workflows use:
 Configured in workflows:
 - `RUST_BACKTRACE=1` - Show backtraces on panics
 - `CARGO_TERM_COLOR=always` - Colorized output
-- `MSRV=1.70.0` - Minimum Supported Rust Version
+- `MSRV=1.90.0` - Minimum Supported Rust Version
 
 ---
 
@@ -232,7 +232,7 @@ just precommit  # Ensures CI will pass
 Edit `ci.yml`:
 ```yaml
 env:
-  MSRV: "1.70.0"  # Change to desired version
+  MSRV: "1.90.0"  # Change to desired version
 ```
 
 ### Adding/Removing Test Platforms

@@ -101,7 +101,7 @@ This document summarizes all the CI/CD and benchmark best practices infrastructu
    - Includes doc tests
 
 5. **Tests (MSRV)** (~10min)
-   - Tests on Rust 1.70.0
+   - Tests on Rust 1.90.0
    - Ensures backward compatibility
 
 6. **Build (Feature Combinations)** (~5min)
@@ -378,12 +378,12 @@ just bench-compare OLD.txt NEW.txt
 ## 🔧 Configuration
 
 ### Minimum Supported Rust Version (MSRV)
-**Current**: 1.70.0
+**Current**: 1.90.0
 
 **To change**: Edit `ci.yml`:
 ```yaml
 env:
-  MSRV: "1.70.0"  # Change here
+  MSRV: "1.90.0"  # Change here
 ```
 
 ### Benchmark Schedule
