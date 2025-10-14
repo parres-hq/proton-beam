@@ -94,22 +94,21 @@ impl TryFrom<&str> for ProtoEvent {
         }
 
         // Parse JSON using nostr-sdk for proper validation
-        let nostr_event: nostr_sdk::Event = serde_json::from_str(json)
-            .map_err(|e| {
-                // Enhance error message with more context
-                let msg = e.to_string();
+        let nostr_event: nostr_sdk::Event = serde_json::from_str(json).map_err(|e| {
+            // Enhance error message with more context
+            let msg = e.to_string();
 
-                // Try to identify which field caused the issue
-                let hint = if msg.contains("expected a string") {
-                    " (hint: ensure id, pubkey, sig are hex strings and all tag values are strings)"
-                } else if msg.contains("missing field") {
-                    " (required Nostr event fields: id, pubkey, created_at, kind, tags, content, sig)"
-                } else {
-                    ""
-                };
+            // Try to identify which field caused the issue
+            let hint = if msg.contains("expected a string") {
+                " (hint: ensure id, pubkey, sig are hex strings and all tag values are strings)"
+            } else if msg.contains("missing field") {
+                " (required Nostr event fields: id, pubkey, created_at, kind, tags, content, sig)"
+            } else {
+                ""
+            };
 
-                crate::error::Error::Conversion(format!("{}{}", msg, hint))
-            })?;
+            crate::error::Error::Conversion(format!("{}{}", msg, hint))
+        })?;
         Ok(ProtoEvent::from(nostr_event))
     }
 }

@@ -236,9 +236,7 @@ fn init_logging(verbose: bool, output_dir: &Path) {
         .with_filter(file_filter);
 
     // Initialize subscriber with only file layer (no stderr output)
-    tracing_subscriber::registry()
-        .with(file_layer)
-        .init();
+    tracing_subscriber::registry().with(file_layer).init();
 }
 
 fn convert_events(
@@ -664,7 +662,9 @@ fn process_chunk(
         }
 
         // Update progress periodically (every 10 lines for better responsiveness)
-        if line_num.is_multiple_of(10) && let Some(ref pb) = progress {
+        if line_num.is_multiple_of(10)
+            && let Some(ref pb) = progress
+        {
             let stats = global_stats.lock().unwrap();
             pb.set_position(position);
             pb.set_message(format!(

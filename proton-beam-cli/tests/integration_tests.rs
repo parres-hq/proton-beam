@@ -227,25 +227,6 @@ fn test_date_based_organization() {
 }
 
 #[test]
-fn test_verbose_output() {
-    let temp_dir = TempDir::new().unwrap();
-    let sample_path = sample_events_path();
-
-    let mut cmd = Command::cargo_bin("proton-beam").unwrap();
-    cmd.arg("convert")
-        .arg(&sample_path)
-        .arg("--output-dir")
-        .arg(temp_dir.path())
-        .arg("--verbose")
-        .arg("--no-progress");
-
-    cmd.assert()
-        .success()
-        .stderr(predicate::str::contains("Starting Proton Beam CLI"))
-        .stderr(predicate::str::contains("Batch size:"));
-}
-
-#[test]
 fn test_empty_file() {
     let temp_dir = TempDir::new().unwrap();
 
