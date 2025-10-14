@@ -111,8 +111,7 @@ fn main() -> Result<()> {
             no_progress,
         } => {
             // Create output directory first (needed for log file)
-            std::fs::create_dir_all(&output_dir)
-                .context("Failed to create output directory")?;
+            std::fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
 
             // Initialize logging (creates log file in output_dir)
             init_logging(verbose, &output_dir);
@@ -146,8 +145,8 @@ fn main() -> Result<()> {
 }
 
 fn init_logging(verbose: bool, output_dir: &Path) {
-    use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, EnvFilter};
     use std::fs::OpenOptions;
+    use tracing_subscriber::{EnvFilter, filter::LevelFilter, fmt, prelude::*};
 
     let filter = if verbose {
         LevelFilter::DEBUG

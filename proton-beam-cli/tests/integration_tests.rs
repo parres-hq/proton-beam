@@ -193,7 +193,10 @@ fn test_error_logging() {
     // Verify the log file has content
     let content = fs::read_to_string(&log_file).unwrap();
     assert!(!content.is_empty(), "Log file should not be empty");
-    assert!(content.contains("parse_error"), "Log should contain parse error");
+    assert!(
+        content.contains("parse_error"),
+        "Log should contain parse error"
+    );
 }
 
 #[test]

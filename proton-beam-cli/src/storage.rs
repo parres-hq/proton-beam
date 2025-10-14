@@ -188,9 +188,7 @@ mod tests {
     #[test]
     fn test_error_logging() {
         // Initialize test logging
-        let _ = tracing_subscriber::fmt()
-            .with_test_writer()
-            .try_init();
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let temp_dir = TempDir::new().unwrap();
         let manager = StorageManager::new(temp_dir.path(), 10).unwrap();
