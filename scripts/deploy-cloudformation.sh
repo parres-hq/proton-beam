@@ -29,7 +29,7 @@ fi
 
 # Default values
 STACK_NAME="${STACK_NAME:-proton-beam-${USER}-$(date +%s)}"
-REGION="${AWS_REGION:-us-east-1}"
+REGION="${AWS_REGION:-eu-west-2}"
 
 echo "Configuration:"
 echo "  Stack Name: $STACK_NAME"
