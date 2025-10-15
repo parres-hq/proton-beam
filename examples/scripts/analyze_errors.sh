@@ -86,7 +86,7 @@ VALIDATION_ERRORS=$(grep "validation_error" "$LOG_FILE" 2>/dev/null | wc -l | xa
 if [ "$VALIDATION_ERRORS" -gt 0 ]; then
   echo "  • $VALIDATION_ERRORS validation errors found"
   echo "    - Events may have invalid signatures or IDs"
-  echo "    - Consider using --no-validate if data is trusted"
+  echo "    - Consider using --validate-signatures=false --validate-event-ids=false if data is trusted"
   echo ""
 fi
 

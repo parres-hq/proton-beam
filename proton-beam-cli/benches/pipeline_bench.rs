@@ -395,6 +395,6 @@ fn main() {
     println!("\n✅ Pipeline benchmarks complete!");
     println!("\n💡 Tips:");
     println!("  - Use larger batch sizes (1000-5000) for better performance");
-    println!("  - Skip validation with --no-validate for maximum speed");
+    println!("  - Skip validation with --validate-signatures=false --validate-event-ids=false for maximum speed");
     println!("  - Streaming mode keeps memory usage constant regardless of file size");
 }

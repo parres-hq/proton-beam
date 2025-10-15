@@ -37,11 +37,12 @@ rm -rf "$OUTPUT_WITHOUT_FILTER" "$OUTPUT_WITH_FILTER"
 mkdir -p "$OUTPUT_WITHOUT_FILTER" "$OUTPUT_WITH_FILTER"
 
 echo "1️⃣  Converting WITHOUT preprocessing filter..."
-echo "   Command: proton-beam convert sample_events.jsonl --no-validate -j 1"
+echo "   Command: proton-beam convert sample_events.jsonl --validate-signatures=false --validate-event-ids=false -j 1"
 echo ""
 time "$BINARY" convert "$SAMPLE_FILE" \
     --output-dir "$OUTPUT_WITHOUT_FILTER" \
-    --no-validate \
+    --validate-signatures=false \
+    --validate-event-ids=false \
     -j 1
 
 echo ""
@@ -49,11 +50,12 @@ echo "================================================"
 echo ""
 
 echo "2️⃣  Converting WITH preprocessing filter..."
-echo "   Command: proton-beam convert sample_events.jsonl --no-validate --filter-invalid-kinds -j 1"
+echo "   Command: proton-beam convert sample_events.jsonl --validate-signatures=false --validate-event-ids=false --filter-invalid-kinds -j 1"
 echo ""
 time "$BINARY" convert "$SAMPLE_FILE" \
     --output-dir "$OUTPUT_WITH_FILTER" \
-    --no-validate \
+    --validate-signatures=false \
+    --validate-event-ids=false \
     --filter-invalid-kinds \
     -j 1
 
@@ -73,8 +75,8 @@ echo "  • Processing large datasets with known invalid kinds"
 echo "  • You want to avoid error logs for out-of-range kinds"
 echo "  • Maximum conversion speed is needed"
 echo ""
-echo "Combine with --no-validate and --parallel for maximum throughput:"
-echo "  proton-beam convert events.jsonl --filter-invalid-kinds --no-validate -j 8"
+echo "Combine with disabled validation and --parallel for maximum throughput:"
+echo "  proton-beam convert events.jsonl --filter-invalid-kinds --validate-signatures=false --validate-event-ids=false -j 8"
 echo ""
 
 # Cleanup

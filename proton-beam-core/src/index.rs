@@ -257,7 +257,7 @@ impl EventIndex {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn insert_batch(&mut self, events: &[(&ProtoEvent, &str)]) -> Result<()> {
+    pub fn insert_batch(&mut self, events: &[(&ProtoEvent, &str)]) -> Result<(usize, usize)> {
         let tx = self
             .conn
             .transaction()
@@ -268,6 +268,9 @@ impl EventIndex {
             .unwrap()
             .as_secs() as i64;
 
+        let mut inserted = 0usize;
+        let mut duplicates = 0usize;
+
         {
             let mut stmt = tx
                 .prepare_cached(
@@ -277,24 +280,30 @@ impl EventIndex {
                 .map_err(|e| Error::InvalidEvent(format!("Failed to prepare insert: {}", e)))?;
 
             for (event, file_path) in events {
-                stmt.execute(params![
-                    &event.id,
-                    event.kind,
-                    &event.pubkey,
-                    event.created_at,
-                    file_path,
-                    indexed_at
-                ])
-                .map_err(|e| {
-                    Error::InvalidEvent(format!("Failed to insert event in batch: {}", e))
-                })?;
+                let rows = stmt
+                    .execute(params![
+                        &event.id,
+                        event.kind,
+                        &event.pubkey,
+                        event.created_at,
+                        file_path,
+                        indexed_at
+                    ])
+                    .map_err(|e| {
+                        Error::InvalidEvent(format!("Failed to insert event in batch: {}", e))
+                    })?;
+                if rows == 0 {
+                    duplicates += 1;
+                } else {
+                    inserted += 1;
+                }
             }
         }
 
         tx.commit()
             .map_err(|e| Error::InvalidEvent(format!("Failed to commit transaction: {}", e)))?;
 
-        Ok(())
+        Ok((inserted, duplicates))
     }
 
     /// Get statistics about the index

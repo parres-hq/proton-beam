@@ -90,10 +90,13 @@ pub use conversion::{json_to_proto, proto_to_json};
 pub use error::{Error, Result};
 pub use index::{EventIndex, EventRecord, IndexStats};
 pub use storage::{
-    create_gzip_decoder, create_gzip_encoder, read_events_delimited, write_event_delimited,
-    write_events_delimited,
+    create_gzip_decoder, create_gzip_encoder, create_gzip_encoder_with_level,
+    read_events_delimited, write_event_delimited, write_events_delimited,
 };
-pub use validation::validate_event;
+pub use validation::{
+    compute_event_hash, validate_basic_fields, validate_event, validate_event_id_from_hash,
+    validate_event_id_only, validate_signature_from_hash, validate_signature_only,
+};
 
 #[cfg(test)]
 mod tests {

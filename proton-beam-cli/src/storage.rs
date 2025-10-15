@@ -1,49 +1,72 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use proton_beam_core::{ProtoEvent, create_gzip_encoder, write_event_delimited};
+use proton_beam_core::{
+    EventIndex, ProtoEvent, create_gzip_encoder_with_level, write_event_delimited,
+};
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use tracing::error;
+
+// Buffer size for storage writers (512KB for optimal compression)
+const STORAGE_WRITER_BUFFER_SIZE: usize = 512 * 1024;
+
+type GzipWriter = BufWriter<flate2::write::GzEncoder<File>>;
 
 /// Manages storage of events into date-organized protobuf files
 pub struct StorageManager {
     output_dir: PathBuf,
     batch_size: usize,
+    compression_level: u32,
+    index: Option<EventIndex>,
 
     // Optional prefix for temp file names (used for parallel processing)
     file_prefix: Option<String>,
 
     // Map of date string (YYYY_MM_DD) to buffered events
     buffers: HashMap<String, Vec<ProtoEvent>>,
+
+    // Keep writers open for reuse (map of date -> writer)
+    writers: HashMap<String, GzipWriter>,
 }
 
 impl StorageManager {
     /// Create a new storage manager
-    pub fn new(output_dir: &Path, batch_size: usize) -> Result<Self> {
+    pub fn new(output_dir: &Path, batch_size: usize, compression_level: u32) -> Result<Self> {
         // Create the output directory if it doesn't exist
         std::fs::create_dir_all(output_dir).context("Failed to create output directory")?;
 
         Ok(Self {
             output_dir: output_dir.to_path_buf(),
             batch_size,
+            compression_level,
+            index: None,
             file_prefix: None,
             buffers: HashMap::new(),
+            writers: HashMap::new(),
         })
     }
 
     /// Create a new storage manager with a file prefix for parallel processing
     /// Files will be named: {prefix}_{date}.pb.gz.tmp
-    pub fn new_with_prefix(output_dir: &Path, batch_size: usize, thread_id: usize) -> Result<Self> {
+    pub fn new_with_prefix(
+        output_dir: &Path,
+        batch_size: usize,
+        thread_id: usize,
+        compression_level: u32,
+    ) -> Result<Self> {
         // Create the output directory if it doesn't exist
         std::fs::create_dir_all(output_dir).context("Failed to create output directory")?;
 
         Ok(Self {
             output_dir: output_dir.to_path_buf(),
             batch_size,
+            compression_level,
+            index: None,
             file_prefix: Some(format!("thread_{}", thread_id)),
             buffers: HashMap::new(),
+            writers: HashMap::new(),
         })
     }
 
@@ -76,45 +99,55 @@ impl StorageManager {
         Ok(datetime.format("%Y_%m_%d").to_string())
     }
 
-    /// Public method to get the date string for an event (used for indexing)
-    pub fn get_date_string_for_event(&self, event: &ProtoEvent) -> Result<String> {
-        self.get_date_string(event)
-    }
-
-    /// Flush a specific buffer to disk
+    /// Flush a specific buffer to disk (reuses writer if possible)
     fn flush_buffer(&mut self, date_str: &str) -> Result<()> {
         let buffer = match self.buffers.remove(date_str) {
             Some(buf) if !buf.is_empty() => buf,
             _ => return Ok(()), // Nothing to flush
         };
 
-        // Open the output file for this date (append mode)
-        let filename = if let Some(ref prefix) = self.file_prefix {
-            // Parallel mode: thread_{id}_{date}.pb.gz.tmp
-            format!("{}_{}.pb.gz.tmp", prefix, date_str)
-        } else {
-            // Normal mode: {date}.pb.gz
-            format!("{}.pb.gz", date_str)
-        };
+        let (filename, index_target): (String, Option<String>) =
+            if let Some(ref prefix) = self.file_prefix {
+                (format!("{}_{}.pb.gz.tmp", prefix, date_str), None)
+            } else {
+                (
+                    format!("{}.pb.gz", date_str),
+                    Some(format!("{}.pb.gz", date_str)),
+                )
+            };
+
+        // Get or create writer for this date
         let output_path = self.output_dir.join(&filename);
-
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&output_path)
-            .context(format!("Failed to open output file: {}", filename))?;
-
-        // Wrap with gzip compression
-        let gz = create_gzip_encoder(file);
-        let mut writer = BufWriter::new(gz);
-
-        // Write all events in the buffer
-        for event in buffer {
-            write_event_delimited(&mut writer, &event).context("Failed to write event")?;
+        if !self.writers.contains_key(date_str) {
+            let writer = self.create_writer(&output_path)?;
+            self.writers.insert(date_str.to_string(), writer);
         }
 
-        // Ensure all data is written (this also finishes the gzip stream)
+        let writer = self
+            .writers
+            .get_mut(date_str)
+            .expect("Writer should exist after insert");
+        let mut index_batch: Vec<(ProtoEvent, String)> = Vec::new();
+
+        for event in buffer {
+            write_event_delimited(writer, &event).context("Failed to write event")?;
+            if let Some(ref file_name) = index_target {
+                index_batch.push((event, file_name.clone()));
+            }
+        }
+
+        // Flush writer periodically but keep it open
         writer.flush().context("Failed to flush writer")?;
+
+        if let (Some(index), Some(_)) = (&mut self.index, index_target)
+            && !index_batch.is_empty()
+        {
+            let batch_refs: Vec<_> = index_batch
+                .iter()
+                .map(|(event, path)| (event, path.as_str()))
+                .collect();
+            index.insert_batch(&batch_refs)?;
+        }
 
         Ok(())
     }
@@ -152,7 +185,34 @@ impl StorageManager {
 impl Drop for StorageManager {
     fn drop(&mut self) {
         // Ensure all buffers are flushed when the manager is dropped
-        let _ = self.flush();
+        if let Err(e) = self.flush() {
+            tracing::error!("StorageManager drop flush error: {}", e);
+        }
+
+        // Close all writers (flush and drop them)
+        for (date, mut writer) in self.writers.drain() {
+            if let Err(e) = writer.flush() {
+                tracing::error!("Failed to flush writer for {}: {}", date, e);
+            }
+            // Writer's Drop will finish the gzip encoding
+        }
+    }
+}
+
+impl StorageManager {
+    fn create_writer(&self, output_path: &Path) -> Result<GzipWriter> {
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(output_path)
+            .context(format!(
+                "Failed to open output file: {}",
+                output_path.display()
+            ))?;
+        Ok(BufWriter::with_capacity(
+            STORAGE_WRITER_BUFFER_SIZE,
+            create_gzip_encoder_with_level(file, self.compression_level),
+        ))
     }
 }
 
@@ -165,7 +225,7 @@ mod tests {
     #[test]
     fn test_date_string_generation() {
         let temp_dir = TempDir::new().unwrap();
-        let manager = StorageManager::new(temp_dir.path(), 100).unwrap();
+        let manager = StorageManager::new(temp_dir.path(), 100, 6).unwrap();
 
         // Create an event with a known timestamp
         // 2025-09-27 00:00:00 UTC = 1758960000
@@ -185,7 +245,7 @@ mod tests {
     #[test]
     fn test_storage_and_flush() {
         let temp_dir = TempDir::new().unwrap();
-        let mut manager = StorageManager::new(temp_dir.path(), 10).unwrap();
+        let mut manager = StorageManager::new(temp_dir.path(), 10, 6).unwrap();
 
         // Create and store some events
         for i in 0..5 {
@@ -215,7 +275,7 @@ mod tests {
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let temp_dir = TempDir::new().unwrap();
-        let manager = StorageManager::new(temp_dir.path(), 10).unwrap();
+        let manager = StorageManager::new(temp_dir.path(), 10, 6).unwrap();
 
         // Test error logging with event ID
         manager.log_error(42, "parse_error: missing field 'id'", Some("abcd1234"));

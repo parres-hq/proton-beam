@@ -54,7 +54,8 @@ START_TIME=$(date +%s)
 # Run conversion with performance settings
 "$PROTON_BEAM" convert "$INPUT_FILE" \
   --output-dir "$OUTPUT_DIR" \
-  --no-validate \
+  --validate-signatures=false \
+  --validate-event-ids=false \
   --batch-size 2000 \
   --no-progress
 

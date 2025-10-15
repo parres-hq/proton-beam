@@ -104,20 +104,26 @@ Events are organized by date:
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--output-dir` | `-o` | `./pb_data` | Output directory for protobuf files |
-| `--batch-size` | `-b` | `500` | Number of events to buffer before writing |
-| `--no-validate` | | `false` | Skip event validation (faster, less safe) |
+| `--batch-size` | `-b` | `1000` | Number of events to buffer before writing |
+| `--validate-signatures` | | `true` | Validate Schnorr signatures (set to false to skip) |
+| `--validate-event-ids` | | `true` | Validate event IDs/hashes (set to false to skip) |
+| `--parallel` | `-j` | `# of CPUs` | Number of parallel threads for processing |
+| `--filter-invalid-kinds` | | `true` | Prefilter events with invalid kind values |
+| `--no-filter-kinds` | | `false` | Disable preprocessing filter for invalid kinds |
+| `--compression-level` | | `6` | Compression level (0-9, higher = better compression) |
 | `--verbose` | `-v` | `false` | Enable detailed logging |
 | `--no-progress` | | `false` | Disable progress bar |
 | `--help` | `-h` | | Show help information |
 
 ### Performance Guidelines
 
-| Scenario | Batch Size | Validate | Progress |
-|----------|-----------|----------|----------|
-| **Streaming** | 50-100 | ✅ Yes | ❌ No |
-| **Files** | 500-1000 | ✅ Yes | ✅ Yes |
-| **Large Batch** | 2000+ | ❌ No* | ❌ No |
-| **Debugging** | 100 | ✅ Yes | ✅ Yes |
+| Scenario | Batch Size | Validate | Progress | Threads |
+|----------|-----------|----------|----------|---------|
+| **Streaming** | 50-100 | ✅ Yes | ❌ No | 1 |
+| **Small Files** | 500-1000 | ✅ Yes | ✅ Yes | 1 |
+| **Large Files** | 1000-2000 | ✅ Yes | ✅ Yes | Auto (all CPUs) |
+| **Huge Batch** | 2000+ | ❌ No* | ❌ No | Auto |
+| **Debugging** | 100 | ✅ Yes | ✅ Yes | 1 |
 
 *Only skip validation for trusted, pre-validated data
 
@@ -131,7 +137,19 @@ proton-beam convert events.jsonl
 proton-beam convert events.jsonl --output-dir ~/archive
 
 # High-performance mode (trusted data only)
-proton-beam convert events.jsonl --no-validate --batch-size 2000
+proton-beam convert events.jsonl \
+  --validate-signatures=false \
+  --validate-event-ids=false \
+  --batch-size 2000
+
+# Parallel processing with 8 threads
+proton-beam convert events.jsonl --parallel 8
+
+# Maximum compression
+proton-beam convert events.jsonl --compression-level 9
+
+# Disable kind filtering (process all events, even invalid kinds)
+proton-beam convert events.jsonl --no-filter-kinds
 
 # Verbose debugging
 proton-beam convert events.jsonl --verbose
@@ -286,7 +304,7 @@ nak req --stream wss://relay.damus.io | \
 ### With Docker
 
 ```dockerfile
-FROM rust:1.70 as builder
+FROM rust:1.90 as builder
 WORKDIR /app
 COPY . .
 RUN cargo build --release -p proton-beam-cli
@@ -362,7 +380,7 @@ grep "line=" ./pb_data/proton-beam.log
 | **"No such file or directory"** | Check file path or create output directory: `mkdir -p ./pb_data` |
 | **"Permission denied"** | Check write permissions: `chmod u+w ./pb_data` |
 | **High memory usage** | Reduce batch size: `--batch-size 100` |
-| **Slow processing** | Skip validation if safe: `--no-validate` |
+| **Slow processing** | Skip validation if safe: `--validate-signatures=false --validate-event-ids=false` |
 | **No progress bar showing** | Don't redirect stdout, or use `--no-progress` explicitly |
 | **All events failing** | Check JSON format, ensure one event per line |
 

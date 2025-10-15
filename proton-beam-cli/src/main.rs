@@ -1,18 +1,50 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
-use proton_beam_core::{ProtoEvent, validate_event};
+use proton_beam_core::{
+    ProtoEvent, compute_event_hash, validate_basic_fields, validate_event_id_from_hash,
+    validate_signature_from_hash,
+};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{debug, error, info};
 
+// Performance tuning constants
+const LINE_COUNT_BUFFER_SIZE: usize = 1024 * 1024; // 1MB for line counting
+const LINE_COUNT_READ_BUFFER: usize = 512 * 1024; // 512KB for read buffer
+// const FILE_READER_BUFFER_SIZE: usize = 1024 * 1024; // 1MB for file reading
+// const STORAGE_WRITER_BUFFER_SIZE: usize = 512 * 1024; // 512KB for writing
+const PROGRESS_UPDATE_INTERVAL: u64 = 1000; // Update progress every N lines
+const INDEX_BATCH_SIZE: usize = 5000; // Batch size for index operations
+
+fn count_lines(path: &Path) -> Result<u64> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::with_capacity(LINE_COUNT_BUFFER_SIZE, file);
+    let mut count = 0u64;
+    let mut buffer = [0u8; LINE_COUNT_READ_BUFFER];
+
+    loop {
+        let bytes_read = reader.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        count += bytecount::count(&buffer[..bytes_read], b'\n') as u64;
+    }
+
+    Ok(count)
+}
+
 mod input;
 mod progress;
 mod storage;
+
+#[cfg(feature = "s3")]
+mod s3;
 
 use input::InputReader;
 use storage::StorageManager;
@@ -38,13 +70,13 @@ enum Commands {
         #[arg(short, long, default_value = "./pb_data")]
         output_dir: PathBuf,
 
-        /// Path to SQLite index database (defaults to OUTPUT_DIR/index.db)
-        #[arg(long)]
-        index_path: Option<PathBuf>,
+        /// Validate Schnorr signatures (default: true)
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        validate_signatures: bool,
 
-        /// Skip event validation (faster but dangerous)
-        #[arg(long)]
-        no_validate: bool,
+        /// Validate event IDs / hashes (default: true)
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        validate_event_ids: bool,
 
         /// Batch size for writing events
         #[arg(short, long, default_value = "1000")]
@@ -69,6 +101,42 @@ enum Commands {
         /// Disable preprocessing filter for invalid kinds
         #[arg(long, conflicts_with = "filter_invalid_kinds")]
         no_filter_kinds: bool,
+
+        /// Compression level (0-9, default: 6)
+        #[arg(long, value_parser = clap::value_parser!(u32).range(0..=9), default_value_t = 6)]
+        compression_level: u32,
+
+        /// Upload output files to S3 (format: s3://bucket/prefix)
+        #[arg(long)]
+        s3_output: Option<String>,
+    },
+
+    /// Build or rebuild the event index from protobuf files
+    Index {
+        #[command(subcommand)]
+        action: IndexAction,
+    },
+}
+
+#[derive(Parser, Debug)]
+enum IndexAction {
+    /// Rebuild the index from existing protobuf files
+    Rebuild {
+        /// Directory containing protobuf files
+        #[arg(value_name = "PB_DIR", default_value = "./pb_data")]
+        pb_dir: PathBuf,
+
+        /// Path to SQLite index database (defaults to PB_DIR/index.db)
+        #[arg(long)]
+        index_path: Option<PathBuf>,
+
+        /// Show detailed progress information
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Upload index to S3 (format: s3://bucket/prefix)
+        #[arg(long)]
+        s3_output: Option<String>,
     },
 }
 
@@ -78,7 +146,6 @@ struct ConversionStats {
     valid_events: u64,
     invalid_events: u64,
     skipped_lines: u64,
-    duplicates: u64,
 }
 
 impl ConversionStats {
@@ -88,7 +155,6 @@ impl ConversionStats {
             valid_events: 0,
             invalid_events: 0,
             skipped_lines: 0,
-            duplicates: 0,
         }
     }
 
@@ -97,9 +163,6 @@ impl ConversionStats {
         println!("  Total lines processed: {}", self.total_lines);
         println!("  ✅ Valid events:       {}", self.valid_events);
         println!("  ❌ Invalid events:     {}", self.invalid_events);
-        if self.duplicates > 0 {
-            println!("  🔄 Duplicate events:   {}", self.duplicates);
-        }
         if self.skipped_lines > 0 {
             println!("  ⏭️  Skipped lines:      {}", self.skipped_lines);
         }
@@ -113,21 +176,24 @@ impl ConversionStats {
     }
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Convert {
             input,
             output_dir,
-            index_path,
-            no_validate,
+            validate_signatures,
+            validate_event_ids,
             batch_size,
             verbose,
             no_progress,
             parallel,
             filter_invalid_kinds,
             no_filter_kinds,
+            compression_level,
+            s3_output,
         } => {
             // Apply no_filter_kinds flag
             let filter_invalid_kinds = filter_invalid_kinds && !no_filter_kinds;
@@ -137,9 +203,6 @@ fn main() -> Result<()> {
             // Initialize logging (creates log file in output_dir)
             init_logging(verbose, &output_dir);
 
-            // Determine index path
-            let index_path = index_path.unwrap_or_else(|| output_dir.join("index.db"));
-
             // Determine number of threads
             let num_threads = parallel.unwrap_or_else(|| {
                 std::thread::available_parallelism()
@@ -148,13 +211,24 @@ fn main() -> Result<()> {
             });
 
             // Log to file
-            info!("Starting Proton Beam CLI");
+            info!("Starting Proton Beam - Conversion");
             info!("Input: {}", input.display());
             info!("Output directory: {}", output_dir.display());
-            info!("Index database: {}", index_path.display());
             info!(
-                "Validation: {}",
-                if no_validate { "disabled" } else { "enabled" }
+                "Validation (signatures): {}",
+                if validate_signatures {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
+            );
+            info!(
+                "Validation (event IDs): {}",
+                if validate_event_ids {
+                    "enabled"
+                } else {
+                    "disabled"
+                }
             );
             info!("Batch size: {}", batch_size);
             info!("Parallel threads: {}", num_threads);
@@ -166,39 +240,109 @@ fn main() -> Result<()> {
                     "disabled"
                 }
             );
+            info!("Compression level: {}", compression_level);
 
             // Print clean startup message to stdout
             if !no_progress {
                 println!("🚀 Proton Beam - Converting Nostr events to Protobuf");
                 println!("   Input: {}", input.display());
+                println!("   Output: {}", output_dir.display());
                 println!("   Threads: {}", num_threads);
                 println!();
             }
 
-            // Run conversion
+            // Run conversion (always parallel if num_threads > 1)
             if num_threads > 1 {
                 convert_events_parallel(
                     &input,
                     &output_dir,
-                    &index_path,
-                    !no_validate,
+                    validate_signatures,
+                    validate_event_ids,
                     batch_size,
                     !no_progress,
                     num_threads,
                     filter_invalid_kinds,
+                    compression_level,
                 )?;
             } else {
                 convert_events(
                     &input,
                     &output_dir,
-                    &index_path,
-                    !no_validate,
+                    validate_signatures,
+                    validate_event_ids,
                     batch_size,
                     !no_progress,
                     filter_invalid_kinds,
+                    compression_level,
                 )?;
             }
+
+            // Upload to S3 if requested
+            #[cfg(feature = "s3")]
+            if let Some(s3_uri) = s3_output {
+                println!("\n☁️  Uploading to S3...");
+                info!("Starting S3 upload to: {}", s3_uri);
+
+                let (bucket, prefix) = s3::parse_s3_uri(&s3_uri)?;
+                let uploader = s3::S3Uploader::new(bucket, prefix).await?;
+                uploader.upload_all(&output_dir).await?;
+
+                println!("✅ Upload to S3 complete!");
+            }
+
+            #[cfg(not(feature = "s3"))]
+            if s3_output.is_some() {
+                eprintln!("⚠️  Warning: S3 upload requested but S3 feature not enabled.");
+                eprintln!("   Rebuild with: cargo build --release --features s3");
+            }
         }
+
+        Commands::Index { action } => match action {
+            IndexAction::Rebuild {
+                pb_dir,
+                index_path,
+                verbose,
+                s3_output,
+            } => {
+                // Initialize logging
+                init_logging(verbose, &pb_dir);
+
+                // Determine index path
+                let index_path = index_path.unwrap_or_else(|| pb_dir.join("index.db"));
+
+                info!("Starting Proton Beam - Index Rebuild");
+                info!("Protobuf directory: {}", pb_dir.display());
+                info!("Index database: {}", index_path.display());
+
+                println!("🔍 Proton Beam - Rebuilding Event Index");
+                println!("   Source: {}", pb_dir.display());
+                println!("   Index: {}", index_path.display());
+                println!();
+
+                rebuild_index(&pb_dir, &index_path)?;
+
+                // Upload to S3 if requested
+                #[cfg(feature = "s3")]
+                if let Some(s3_uri) = s3_output {
+                    println!("\n☁️  Uploading to S3...");
+                    info!("Starting S3 upload to: {}", s3_uri);
+
+                    let (bucket, prefix) = s3::parse_s3_uri(&s3_uri)?;
+                    let uploader = s3::S3Uploader::new(bucket, prefix).await?;
+
+                    // Upload index and protobuf files
+                    uploader.upload_all(&pb_dir).await?;
+
+                    println!("✅ Upload to S3 complete!");
+                }
+
+                #[cfg(not(feature = "s3"))]
+                if s3_output.is_some() {
+                    eprintln!("⚠️  Warning: S3 upload requested but S3 feature not enabled.");
+                    eprintln!("   Rebuild with: cargo build --release --features s3");
+                }
+            }
+        },
     }
 
     Ok(())
@@ -239,33 +383,29 @@ fn init_logging(verbose: bool, output_dir: &Path) {
     tracing_subscriber::registry().with(file_layer).init();
 }
 
+#[allow(clippy::too_many_arguments)]
 fn convert_events(
     input: &Path,
     output_dir: &Path,
-    index_path: &Path,
-    validate: bool,
+    validate_signatures: bool,
+    validate_event_ids: bool,
     batch_size: usize,
     show_progress: bool,
     filter_invalid_kinds: bool,
+    compression_level: u32,
 ) -> Result<()> {
     // Create output directory if it doesn't exist
     std::fs::create_dir_all(output_dir).context("Failed to create output directory")?;
 
-    // Initialize event index
-    use proton_beam_core::EventIndex;
-    let mut index = EventIndex::new(index_path).context("Failed to open event index")?;
-
     // Initialize storage manager
-    let mut storage = StorageManager::new(output_dir, batch_size)?;
+    let mut storage = StorageManager::new(output_dir, batch_size, compression_level)?;
 
     // Initialize input reader with preprocessing options
     let mut reader = InputReader::with_options(input.to_str().unwrap(), filter_invalid_kinds)?;
 
     // Count total lines for progress bar
     let total_lines = if show_progress {
-        std::fs::read_to_string(input)
-            .map(|content| content.lines().count() as u64)
-            .unwrap_or(0)
+        count_lines(input).unwrap_or(0)
     } else {
         0
     };
@@ -299,9 +439,6 @@ fn convert_events(
 
     let mut stats = ConversionStats::new();
 
-    // Buffer for batch index insertions
-    let mut index_buffer: Vec<(ProtoEvent, String)> = Vec::with_capacity(batch_size);
-
     // Process each line
     for (line_num, line_result) in reader.by_ref().enumerate() {
         stats.total_lines += 1;
@@ -325,8 +462,8 @@ fn convert_events(
         if let Some(ref pb) = progress {
             pb.set_position(stats.total_lines);
             pb.set_message(format!(
-                "Valid: {} | Errors: {} | Dupes: {}",
-                stats.valid_events, stats.invalid_events, stats.duplicates
+                "Valid: {} | Errors: {}",
+                stats.valid_events, stats.invalid_events
             ));
         }
 
@@ -340,22 +477,8 @@ fn convert_events(
             }
         };
 
-        // Check for duplicates (check both index and buffer)
-        let in_index = index.contains(&event.id).context("Failed to check index")?;
-        let in_buffer = index_buffer.iter().any(|(e, _)| e.id == event.id);
-
-        if in_index || in_buffer {
-            info!(
-                "Skipping duplicate event: {} (line {})",
-                event.id,
-                line_num + 1
-            );
-            stats.duplicates += 1;
-            continue;
-        }
-
-        // Validate if requested
-        if validate && let Err(e) = validate_event(&event) {
+        // Validate basic fields first (fast check)
+        if let Err(e) = validate_basic_fields(&event) {
             storage.log_error(
                 (line_num + 1) as u64,
                 &format!("validation_error: {}", e),
@@ -365,34 +488,54 @@ fn convert_events(
             continue;
         }
 
-        // Get the date string for file path
-        let date_str = storage.get_date_string_for_event(&event)?;
-        let file_name = format!("{}.pb.gz", date_str);
+        // Compute hash once and reuse for both validations if needed
+        if validate_signatures || validate_event_ids {
+            let hash = match compute_event_hash(&event) {
+                Ok(h) => h,
+                Err(e) => {
+                    storage.log_error(
+                        (line_num + 1) as u64,
+                        &format!("hash_error: {}", e),
+                        Some(&event.id),
+                    );
+                    stats.invalid_events += 1;
+                    continue;
+                }
+            };
+
+            if validate_event_ids && let Err(e) = validate_event_id_from_hash(&event, &hash) {
+                storage.log_error(
+                    (line_num + 1) as u64,
+                    &format!("validation_error: {}", e),
+                    Some(&event.id),
+                );
+                stats.invalid_events += 1;
+                continue;
+            }
+
+            if validate_signatures && let Err(e) = validate_signature_from_hash(&event, &hash) {
+                storage.log_error(
+                    (line_num + 1) as u64,
+                    &format!("validation_error: {}", e),
+                    Some(&event.id),
+                );
+                stats.invalid_events += 1;
+                continue;
+            }
+        }
 
         // Store the event
-        match storage.store_event(event.clone()) {
+        match storage.store_event(event) {
             Ok(_) => {
-                // Buffer the event for batch index insertion
-                index_buffer.push((event, file_name));
                 stats.valid_events += 1;
                 debug!("Successfully stored event from line {}", line_num + 1);
-
-                // Flush index buffer when it reaches batch size
-                if index_buffer.len() >= batch_size {
-                    let batch_refs: Vec<_> =
-                        index_buffer.iter().map(|(e, f)| (e, f.as_str())).collect();
-                    index
-                        .insert_batch(&batch_refs)
-                        .context("Failed to batch insert to index")?;
-                    index_buffer.clear();
-                }
             }
             Err(e) => {
                 error!("Failed to store event from line {}: {}", line_num + 1, e);
                 storage.log_error(
                     (line_num + 1) as u64,
                     &format!("storage_error: {}", e),
-                    Some(&event.id),
+                    None,
                 );
                 stats.invalid_events += 1;
             }
@@ -402,25 +545,16 @@ fn convert_events(
     // Flush any remaining events
     storage.flush()?;
 
-    // Flush any remaining index entries
-    if !index_buffer.is_empty() {
-        let batch_refs: Vec<_> = index_buffer.iter().map(|(e, f)| (e, f.as_str())).collect();
-        index
-            .insert_batch(&batch_refs)
-            .context("Failed to flush final index batch")?;
-    }
-
     // Get filtered count from reader
     let filtered_count = reader.filtered_count();
 
     // Clean up progress bar
     if let Some(pb) = progress {
         pb.finish_with_message(format!(
-            "Complete! Processed: {} | Valid: {} | Errors: {} | Dupes: {}{}",
+            "Complete! Processed: {} | Valid: {} | Errors: {}{}",
             stats.total_lines,
             stats.valid_events,
             stats.invalid_events,
-            stats.duplicates,
             if filtered_count > 0 {
                 format!(" | Filtered: {}", filtered_count)
             } else {
@@ -438,9 +572,8 @@ fn convert_events(
     }
     stats.print_summary();
 
-    // Exit code: 0 if any events succeeded or were duplicates, 1 if all failed
-    // Duplicates are not considered failures since they were successfully processed before
-    if stats.valid_events == 0 && stats.duplicates == 0 && stats.total_lines > 0 {
+    // Exit code: 0 if any events succeeded, 1 if all failed
+    if stats.valid_events == 0 && stats.total_lines > 0 {
         std::process::exit(1);
     }
 
@@ -452,15 +585,14 @@ fn convert_events(
 fn convert_events_parallel(
     input: &Path,
     output_dir: &Path,
-    index_path: &Path,
-    validate: bool,
+    validate_signatures: bool,
+    validate_event_ids: bool,
     batch_size: usize,
     show_progress: bool,
     num_threads: usize,
     filter_invalid_kinds: bool,
+    compression_level: u32,
 ) -> Result<()> {
-    use proton_beam_core::EventIndex;
-
     // Create output directory if it doesn't exist
     std::fs::create_dir_all(output_dir).context("Failed to create output directory")?;
 
@@ -468,16 +600,12 @@ fn convert_events_parallel(
     let temp_dir = output_dir.join("tmp");
     std::fs::create_dir_all(&temp_dir).context("Failed to create temp directory")?;
 
-    // Initialize shared event index
-    let index = Arc::new(Mutex::new(
-        EventIndex::new(index_path).context("Failed to open event index")?,
-    ));
-
-    // Shared stats
-    let stats = Arc::new(Mutex::new(ConversionStats::new()));
-
-    // Shared progress counter for bytes processed
-    let bytes_processed = Arc::new(Mutex::new(0u64));
+    // Shared atomic counters for statistics (lock-free)
+    let total_lines = Arc::new(AtomicU64::new(0));
+    let valid_events = Arc::new(AtomicU64::new(0));
+    let invalid_events = Arc::new(AtomicU64::new(0));
+    let skipped_lines = Arc::new(AtomicU64::new(0));
+    let bytes_processed = Arc::new(AtomicU64::new(0));
 
     // Get file size for progress bar
     let file_size = std::fs::metadata(input)?.len();
@@ -506,42 +634,55 @@ fn convert_events_parallel(
         None
     };
 
-    // Process chunks in parallel
-    let handles: Vec<_> = chunks
-        .into_iter()
-        .enumerate()
-        .map(|(thread_id, (start, end))| {
+    let parallel_errors: Arc<Mutex<Vec<anyhow::Error>>> = Arc::new(Mutex::new(Vec::new()));
+
+    rayon::scope(|scope| {
+        for (thread_id, (start, end)) in chunks.into_iter().enumerate() {
             let input = input.to_path_buf();
             let temp_dir = temp_dir.clone();
-            let index = Arc::clone(&index);
-            let stats = Arc::clone(&stats);
+            let total_lines = Arc::clone(&total_lines);
+            let valid_events = Arc::clone(&valid_events);
+            let invalid_events = Arc::clone(&invalid_events);
+            let skipped_lines = Arc::clone(&skipped_lines);
             let bytes_processed = Arc::clone(&bytes_processed);
             let progress = progress.as_ref().map(Arc::clone);
+            let errors = Arc::clone(&parallel_errors);
 
-            std::thread::spawn(move || {
-                process_chunk(
+            scope.spawn(move |_| {
+                if let Err(e) = process_chunk(
                     thread_id,
                     &input,
                     start,
                     end,
-                    &temp_dir,
-                    index,
-                    stats,
+                    temp_dir.as_path(),
+                    total_lines,
+                    valid_events,
+                    invalid_events,
+                    skipped_lines,
                     bytes_processed,
                     progress,
-                    validate,
+                    validate_signatures,
+                    validate_event_ids,
                     batch_size,
                     filter_invalid_kinds,
-                )
-            })
-        })
-        .collect();
+                    compression_level,
+                ) {
+                    error!("Thread {} error: {:?}", thread_id, e);
+                    errors.lock().unwrap().push(e);
+                }
+            });
+        }
+    });
 
-    // Wait for all threads to complete
-    for (i, handle) in handles.into_iter().enumerate() {
-        handle
-            .join()
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("Thread {} panicked", i)))?;
+    let errors = Arc::try_unwrap(parallel_errors)
+        .unwrap()
+        .into_inner()
+        .unwrap();
+    if !errors.is_empty() {
+        return Err(anyhow::anyhow!(
+            "Parallel processing encountered errors ({} threads)",
+            errors.len()
+        ));
     }
 
     // Clean up progress bar
@@ -552,20 +693,27 @@ fn convert_events_parallel(
     info!("All chunks processed, merging temporary files...");
 
     // Merge temporary files
-    merge_temp_files(output_dir, &temp_dir)?;
+    merge_temp_files(output_dir, &temp_dir, compression_level)?;
 
     // Clean up temp directory
     std::fs::remove_dir_all(&temp_dir).context("Failed to remove temp directory")?;
 
     info!("Merge complete");
 
-    // Print summary
-    let stats = stats.lock().unwrap();
-    stats.print_summary();
+    // Print summary using atomic values
+    let final_stats = ConversionStats {
+        total_lines: total_lines.load(Ordering::Relaxed),
+        valid_events: valid_events.load(Ordering::Relaxed),
+        invalid_events: invalid_events.load(Ordering::Relaxed),
+        skipped_lines: skipped_lines.load(Ordering::Relaxed),
+    };
+    final_stats.print_summary();
 
-    // Exit code: 0 if any events succeeded or were duplicates, 1 if all failed
-    if stats.valid_events == 0 && stats.duplicates == 0 && stats.total_lines > 0 {
-        std::process::exit(1);
+    // Exit code: 0 if any events succeeded, 1 if all failed
+    if final_stats.valid_events == 0 && final_stats.total_lines > 0 {
+        return Err(anyhow::anyhow!(
+            "Conversion failed: no valid events processed"
+        ));
     }
 
     Ok(())
@@ -618,13 +766,17 @@ fn process_chunk(
     start: u64,
     end: u64,
     temp_dir: &Path,
-    global_index: Arc<Mutex<proton_beam_core::EventIndex>>,
-    global_stats: Arc<Mutex<ConversionStats>>,
-    bytes_processed: Arc<Mutex<u64>>,
+    total_lines: Arc<AtomicU64>,
+    valid_events: Arc<AtomicU64>,
+    invalid_events: Arc<AtomicU64>,
+    skipped_lines: Arc<AtomicU64>,
+    bytes_processed: Arc<AtomicU64>,
     progress: Option<Arc<ProgressBar>>,
-    validate: bool,
+    validate_signatures: bool,
+    validate_event_ids: bool,
     batch_size: usize,
     filter_invalid_kinds: bool,
+    compression_level: u32,
 ) -> Result<()> {
     // Open the file and seek to start position
     let file = File::open(input_path)?;
@@ -632,24 +784,17 @@ fn process_chunk(
     reader.seek(SeekFrom::Start(start))?;
 
     // Thread-local state
-    let mut storage = StorageManager::new_with_prefix(temp_dir, batch_size, thread_id)?;
-    let mut local_seen = HashSet::new();
-    let mut index_buffer: Vec<(ProtoEvent, String)> = Vec::with_capacity(batch_size);
+    let mut storage =
+        StorageManager::new_with_prefix(temp_dir, batch_size, thread_id, compression_level)?;
 
-    // Local stats for this chunk
-    let mut local_stats = ConversionStats::new();
+    // Local stats for this chunk (for logging only)
+    let mut local_total = 0u64;
+    let mut local_valid = 0u64;
+    let mut local_invalid = 0u64;
     let mut filtered_count = 0usize;
-
-    // Track stats since last global update (for periodic syncing)
-    let mut lines_since_update = 0u64;
-    let mut valid_since_update = 0u64;
-    let mut invalid_since_update = 0u64;
-    let mut dupes_since_update = 0u64;
-    let mut skipped_since_update = 0u64;
 
     let mut position = start;
     let mut line_num = 0u64;
-    let mut bytes_since_last_update = 0u64;
 
     while position < end {
         let mut line = String::new();
@@ -660,15 +805,16 @@ fn process_chunk(
         }
 
         position += bytes_read as u64;
-        bytes_since_last_update += bytes_read as u64;
         line_num += 1;
-        local_stats.total_lines += 1;
-        lines_since_update += 1;
+        local_total += 1;
+
+        // Update atomic counters
+        total_lines.fetch_add(1, Ordering::Relaxed);
+        bytes_processed.fetch_add(bytes_read as u64, Ordering::Relaxed);
 
         // Skip empty lines
         if line.trim().is_empty() {
-            local_stats.skipped_lines += 1;
-            skipped_since_update += 1;
+            skipped_lines.fetch_add(1, Ordering::Relaxed);
             continue;
         }
 
@@ -678,47 +824,19 @@ fn process_chunk(
             continue;
         }
 
-        // Update progress periodically (every 10 lines for better responsiveness)
-        if line_num.is_multiple_of(10)
+        // Update progress periodically (every PROGRESS_UPDATE_INTERVAL lines)
+        if line_num.is_multiple_of(PROGRESS_UPDATE_INTERVAL)
             && let Some(ref pb) = progress
         {
-            // Update shared byte counter and global stats atomically
-            let (total_bytes, total_lines, valid_events, invalid_events, duplicates) = {
-                let mut bytes = bytes_processed.lock().unwrap();
-                *bytes += bytes_since_last_update;
-                let total_bytes = *bytes;
-                drop(bytes);
+            let current_bytes = bytes_processed.load(Ordering::Relaxed);
+            let current_lines = total_lines.load(Ordering::Relaxed);
+            let current_valid = valid_events.load(Ordering::Relaxed);
+            let current_invalid = invalid_events.load(Ordering::Relaxed);
 
-                let mut stats = global_stats.lock().unwrap();
-                // Add the incremental counts since last update
-                stats.total_lines += lines_since_update;
-                stats.valid_events += valid_since_update;
-                stats.invalid_events += invalid_since_update;
-                stats.duplicates += dupes_since_update;
-                stats.skipped_lines += skipped_since_update;
-
-                (
-                    total_bytes,
-                    stats.total_lines,
-                    stats.valid_events,
-                    stats.invalid_events,
-                    stats.duplicates,
-                )
-            };
-
-            // Reset incremental counters
-            bytes_since_last_update = 0;
-            lines_since_update = 0;
-            valid_since_update = 0;
-            invalid_since_update = 0;
-            dupes_since_update = 0;
-            skipped_since_update = 0;
-
-            // Update progress bar
-            pb.set_position(total_bytes);
+            pb.set_position(current_bytes);
             pb.set_message(format!(
-                "Lines: {} | Valid: {} | Errors: {} | Dupes: {}",
-                total_lines, valid_events, invalid_events, duplicates
+                "Lines: {} | Valid: {} | Errors: {}",
+                current_lines, current_valid, current_invalid
             ));
         }
 
@@ -727,81 +845,73 @@ fn process_chunk(
             Ok(event) => event,
             Err(e) => {
                 storage.log_error(line_num, &format!("parse_error: {}", e), None);
-                local_stats.invalid_events += 1;
-                invalid_since_update += 1;
+                local_invalid += 1;
+                invalid_events.fetch_add(1, Ordering::Relaxed);
                 continue;
             }
         };
 
-        // Check for duplicates (local HashSet first, then global index)
-        if local_seen.contains(&event.id) {
-            local_stats.duplicates += 1;
-            dupes_since_update += 1;
-            continue;
-        }
-
-        let in_global_index = {
-            let index = global_index.lock().unwrap();
-            index.contains(&event.id).context("Failed to check index")?
-        };
-
-        if in_global_index {
-            local_seen.insert(event.id.clone());
-            local_stats.duplicates += 1;
-            dupes_since_update += 1;
-            continue;
-        }
-
-        // Check against pending buffer
-        if index_buffer.iter().any(|(e, _)| e.id == event.id) {
-            local_stats.duplicates += 1;
-            dupes_since_update += 1;
-            continue;
-        }
-
-        // Validate if requested
-        if validate && let Err(e) = validate_event(&event) {
+        // Validate basic fields first (fast check)
+        if let Err(e) = validate_basic_fields(&event) {
             storage.log_error(
                 line_num,
                 &format!("validation_error: {}", e),
                 Some(&event.id),
             );
-            local_stats.invalid_events += 1;
-            invalid_since_update += 1;
+            local_invalid += 1;
+            invalid_events.fetch_add(1, Ordering::Relaxed);
             continue;
         }
 
-        // Get the date string for file path
-        let date_str = storage.get_date_string_for_event(&event)?;
-        let file_name = format!("{}.pb.gz", date_str);
+        // Compute hash once and reuse for both validations if needed
+        if validate_signatures || validate_event_ids {
+            let hash = match compute_event_hash(&event) {
+                Ok(h) => h,
+                Err(e) => {
+                    storage.log_error(line_num, &format!("hash_error: {}", e), Some(&event.id));
+                    local_invalid += 1;
+                    invalid_events.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                }
+            };
+
+            if validate_event_ids && let Err(e) = validate_event_id_from_hash(&event, &hash) {
+                storage.log_error(
+                    line_num,
+                    &format!("validation_error: {}", e),
+                    Some(&event.id),
+                );
+                local_invalid += 1;
+                invalid_events.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+
+            if validate_signatures && let Err(e) = validate_signature_from_hash(&event, &hash) {
+                storage.log_error(
+                    line_num,
+                    &format!("validation_error: {}", e),
+                    Some(&event.id),
+                );
+                local_invalid += 1;
+                invalid_events.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+        }
 
         // Store the event
-        match storage.store_event(event.clone()) {
+        match storage.store_event(event) {
             Ok(_) => {
-                local_seen.insert(event.id.clone());
-                index_buffer.push((event, file_name));
-                local_stats.valid_events += 1;
-                valid_since_update += 1;
-
-                // Flush index buffer when it reaches batch size
-                if index_buffer.len() >= batch_size {
-                    let batch_refs: Vec<_> =
-                        index_buffer.iter().map(|(e, f)| (e, f.as_str())).collect();
-                    let mut index = global_index.lock().unwrap();
-                    index
-                        .insert_batch(&batch_refs)
-                        .context("Failed to batch insert to index")?;
-                    index_buffer.clear();
-                }
+                local_valid += 1;
+                valid_events.fetch_add(1, Ordering::Relaxed);
             }
             Err(e) => {
                 error!(
                     "Thread {}: Failed to store event from line {}: {}",
                     thread_id, line_num, e
                 );
-                storage.log_error(line_num, &format!("storage_error: {}", e), Some(&event.id));
-                local_stats.invalid_events += 1;
-                invalid_since_update += 1;
+                storage.log_error(line_num, &format!("storage_error: {}", e), None);
+                local_invalid += 1;
+                invalid_events.fetch_add(1, Ordering::Relaxed);
             }
         }
     }
@@ -809,41 +919,12 @@ fn process_chunk(
     // Flush any remaining events
     storage.flush()?;
 
-    // Flush any remaining index entries
-    if !index_buffer.is_empty() {
-        let batch_refs: Vec<_> = index_buffer.iter().map(|(e, f)| (e, f.as_str())).collect();
-        let mut index = global_index.lock().unwrap();
-        index
-            .insert_batch(&batch_refs)
-            .context("Failed to flush final index batch")?;
-    }
-
-    // Final update: flush any remaining incremental stats
-    {
-        // Update bytes if needed
-        if bytes_since_last_update > 0 {
-            let mut bytes = bytes_processed.lock().unwrap();
-            *bytes += bytes_since_last_update;
-        }
-
-        // Update any remaining stats counts
-        if lines_since_update > 0 || valid_since_update > 0 || invalid_since_update > 0 || dupes_since_update > 0 || skipped_since_update > 0 {
-            let mut stats = global_stats.lock().unwrap();
-            stats.total_lines += lines_since_update;
-            stats.valid_events += valid_since_update;
-            stats.invalid_events += invalid_since_update;
-            stats.duplicates += dupes_since_update;
-            stats.skipped_lines += skipped_since_update;
-        }
-    }
-
     info!(
-        "Thread {} completed: {} lines, {} valid, {} errors, {} dupes{}",
+        "Thread {} completed: {} lines, {} valid, {} errors{}",
         thread_id,
-        local_stats.total_lines,
-        local_stats.valid_events,
-        local_stats.invalid_events,
-        local_stats.duplicates,
+        local_total,
+        local_valid,
+        local_invalid,
         if filtered_count > 0 {
             format!(", {} filtered", filtered_count)
         } else {
@@ -855,7 +936,7 @@ fn process_chunk(
 }
 
 /// Merge temporary files into final date-organized files
-fn merge_temp_files(output_dir: &Path, temp_dir: &Path) -> Result<()> {
+fn merge_temp_files(output_dir: &Path, temp_dir: &Path, compression_level: u32) -> Result<()> {
     // Group temp files by date
     let mut files_by_date: HashMap<String, Vec<PathBuf>> = HashMap::new();
 
@@ -872,7 +953,7 @@ fn merge_temp_files(output_dir: &Path, temp_dir: &Path) -> Result<()> {
 
     // Merge each date's files
     for (date, temp_files) in files_by_date {
-        merge_protobuf_files_with_dedup(&temp_files, output_dir, &date)?;
+        merge_protobuf_files_with_dedup(&temp_files, output_dir, &date, compression_level)?;
     }
 
     Ok(())
@@ -902,28 +983,21 @@ fn extract_date_from_temp_filename(path: &Path) -> Option<String> {
     }
 }
 
-/// Read events from a gzipped protobuf file
-fn read_events_from_gzip_file(path: &Path) -> Result<Vec<ProtoEvent>> {
-    use proton_beam_core::{create_gzip_decoder, read_events_delimited};
-
-    let file = File::open(path)?;
-    let gz = create_gzip_decoder(file);
-    let events: Result<Vec<_>> = read_events_delimited(gz)
-        .map(|result| result.context("Failed to read event"))
-        .collect();
-    events
-}
-
 /// Merge multiple protobuf files with deduplication
 fn merge_protobuf_files_with_dedup(
     sources: &[PathBuf],
     output_dir: &Path,
     date_str: &str,
+    compression_level: u32,
 ) -> Result<()> {
-    use proton_beam_core::{create_gzip_encoder, write_event_delimited};
+    use proton_beam_core::{
+        create_gzip_decoder, create_gzip_encoder_with_level, read_events_delimited,
+        write_event_delimited,
+    };
     use std::io::BufWriter;
 
     let final_file = output_dir.join(format!("{}.pb.gz", date_str));
+    let temp_output = output_dir.join(format!("{}.pb.gz.tmp", date_str));
 
     // If final file already exists, we need to include it in the merge
     let mut all_sources = sources.to_vec();
@@ -931,17 +1005,20 @@ fn merge_protobuf_files_with_dedup(
         all_sources.push(final_file.clone());
     }
 
-    let output_file = File::create(&final_file)?;
-    let gz = create_gzip_encoder(output_file);
+    let output_file = File::create(&temp_output)?;
+    let gz = create_gzip_encoder_with_level(output_file, compression_level);
     let mut writer = BufWriter::new(gz);
 
-    // Deduplicate during merge
+    // Deduplicate during merge (streaming)
     let mut seen_ids = HashSet::new();
     let mut event_count = 0;
     let mut duplicate_count = 0;
 
     for source in &all_sources {
-        for event in read_events_from_gzip_file(source)? {
+        let file = File::open(source)?;
+        let gz = create_gzip_decoder(file);
+        for event in read_events_delimited(gz) {
+            let event = event?;
             if !seen_ids.insert(event.id.clone()) {
                 duplicate_count += 1;
                 continue;
@@ -953,6 +1030,8 @@ fn merge_protobuf_files_with_dedup(
     }
 
     writer.flush()?;
+    drop(writer);
+    std::fs::rename(&temp_output, &final_file)?;
 
     if duplicate_count > 0 {
         debug!(
@@ -968,6 +1047,150 @@ fn merge_protobuf_files_with_dedup(
             event_count
         );
     }
+
+    Ok(())
+}
+
+/// Rebuild the event index from existing protobuf files
+fn rebuild_index(pb_dir: &Path, index_path: &Path) -> Result<()> {
+    use proton_beam_core::{EventIndex, create_gzip_decoder, read_events_delimited};
+    use std::time::Instant;
+
+    // Verify pb_dir exists
+    if !pb_dir.exists() {
+        anyhow::bail!("Protobuf directory does not exist: {}", pb_dir.display());
+    }
+
+    // Create or open the index (will truncate if exists)
+    info!("Creating new index at: {}", index_path.display());
+
+    // Delete existing index if it exists
+    if index_path.exists() {
+        std::fs::remove_file(index_path).context("Failed to remove existing index file")?;
+        info!("Removed existing index");
+    }
+
+    let mut index = EventIndex::new(index_path).context("Failed to create event index")?;
+
+    // Find all .pb.gz files in the directory
+    let mut pb_files: Vec<PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(pb_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_file()
+            && let Some(extension) = path.extension()
+            && extension == "gz"
+            && path.to_str().unwrap_or("").ends_with(".pb.gz")
+        {
+            pb_files.push(path);
+        }
+    }
+
+    if pb_files.is_empty() {
+        println!("⚠️  No protobuf files found in {}", pb_dir.display());
+        return Ok(());
+    }
+
+    // Sort files for consistent ordering
+    pb_files.sort();
+
+    println!("📁 Found {} protobuf files", pb_files.len());
+    println!();
+
+    let start_time = Instant::now();
+    let mut total_events = 0u64;
+    let mut total_duplicates = 0u64;
+
+    // Set up progress bar
+    let progress = ProgressBar::new(pb_files.len() as u64);
+    progress.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} files | {msg}")
+            .unwrap()
+            .progress_chars("█▓▒░ ")
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+    );
+    progress.enable_steady_tick(Duration::from_millis(100));
+
+    // Process each file
+    for (file_idx, pb_file) in pb_files.iter().enumerate() {
+        let file_name = pb_file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        progress.set_position(file_idx as u64);
+        progress.set_message(format!(
+            "Events: {} | Dupes: {}",
+            total_events, total_duplicates
+        ));
+
+        // Open and decompress the file
+        let file = File::open(pb_file).context(format!("Failed to open {}", file_name))?;
+        let gz = create_gzip_decoder(file);
+
+        // Stream events instead of loading all into memory
+        let mut file_events = 0;
+        let mut batch: Vec<(ProtoEvent, &str)> = Vec::with_capacity(INDEX_BATCH_SIZE);
+
+        for event_result in read_events_delimited(gz) {
+            let event = event_result.context(format!("Failed to read event from {}", file_name))?;
+            batch.push((event, file_name));
+            file_events += 1;
+
+            // Insert in batches for performance
+            if batch.len() >= INDEX_BATCH_SIZE {
+                let batch_refs: Vec<_> = batch.iter().map(|(e, f)| (e, *f)).collect();
+
+                // Count how many were actually inserted (duplicates are ignored)
+                let (inserted, duplicates_in_batch) = index
+                    .insert_batch(&batch_refs)
+                    .context("Failed to insert batch into index")?;
+
+                total_events += inserted as u64;
+                total_duplicates += duplicates_in_batch as u64;
+                batch.clear();
+            }
+        }
+
+        // Insert remaining events
+        if !batch.is_empty() {
+            let batch_refs: Vec<_> = batch.iter().map(|(e, f)| (e, *f)).collect();
+
+            let (inserted, duplicates_in_batch) = index
+                .insert_batch(&batch_refs)
+                .context("Failed to insert final batch into index")?;
+
+            total_events += inserted as u64;
+            total_duplicates += duplicates_in_batch as u64;
+        }
+
+        debug!("Indexed {} events from {}", file_events, file_name);
+    }
+
+    progress.finish_with_message(format!(
+        "Complete! Indexed {} events ({} duplicates skipped)",
+        total_events, total_duplicates
+    ));
+
+    let elapsed = start_time.elapsed();
+    let events_per_sec = total_events as f64 / elapsed.as_secs_f64();
+
+    println!("\n✅ Index Rebuild Complete");
+    println!("  Indexed events:      {}", total_events);
+    println!("  Duplicates skipped:  {}", total_duplicates);
+    println!("  Time elapsed:        {:.2}s", elapsed.as_secs_f64());
+    println!("  Throughput:          {:.0} events/sec", events_per_sec);
+
+    // Print index stats
+    let stats = index.stats()?;
+    println!("\n📊 Index Statistics:");
+    println!("  Total events:        {}", stats.total_events);
+    println!("  Unique files:        {}", stats.unique_files);
+    println!("  Unique pubkeys:      {}", stats.unique_pubkeys);
+
+    info!("Index rebuild complete: {} events indexed", total_events);
 
     Ok(())
 }

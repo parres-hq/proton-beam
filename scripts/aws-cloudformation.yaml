@@ -1,0 +1,254 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Proton Beam - Automated Nostr Event Processing on EC2'
+
+Parameters:
+  InputURL:
+    Type: String
+    Description: 'URL or S3 path to input JSONL file (e.g., https://example.com/data.jsonl or s3://bucket/data.jsonl)'
+
+  S3OutputBucket:
+    Type: String
+    Description: 'S3 bucket name for output (without s3:// prefix)'
+
+  S3OutputPrefix:
+    Type: String
+    Default: 'proton-beam-output/'
+    Description: 'S3 prefix/path for output files'
+
+  InstanceType:
+    Type: String
+    Default: 'c6i.32xlarge'
+    AllowedValues:
+      - c6i.2xlarge
+      - c6i.4xlarge
+      - c6i.8xlarge
+      - c6i.16xlarge
+      - c6i.32xlarge
+      - c7i.8xlarge
+      - c7i.16xlarge
+      - c7i.32xlarge
+    Description: 'EC2 instance type (larger = faster)'
+
+  VolumeSize:
+    Type: Number
+    Default: 5000
+    MinValue: 50
+    MaxValue: 16384
+    Description: 'EBS volume size in GB'
+
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: 'EC2 key pair for SSH access'
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: 'VPC ID for security group'
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: 'Subnet ID for instance'
+
+  ValidateSignatures:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: 'Validate Schnorr signatures (disable for faster processing)'
+
+  ValidateEventIds:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: 'Validate event ID hashes'
+
+  CompressionLevel:
+    Type: Number
+    Default: 6
+    MinValue: 0
+    MaxValue: 9
+    Description: 'Gzip compression level (0=fastest, 9=smallest)'
+
+  ShutdownWhenDone:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: 'Auto-shutdown instance when processing completes'
+
+  UseSpotInstance:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: 'Use Spot instance for 70% cost savings (may be interrupted)'
+
+Conditions:
+  UseSpot: !Equals [!Ref UseSpotInstance, 'true']
+
+Resources:
+  ProtonBeamSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for Proton Beam EC2 instance'
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: 'SSH access'
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: 'Allow all outbound'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-sg'
+
+  ProtonBeamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::*/*'
+                  - !Sub 'arn:aws:s3:::*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3OutputBucket}/*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-role'
+
+  ProtonBeamInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ProtonBeamRole
+
+  ProtonBeamInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Sub '{{resolve:ssm:/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id}}'
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      IamInstanceProfile: !Ref ProtonBeamInstanceProfile
+      SecurityGroupIds:
+        - !Ref ProtonBeamSecurityGroup
+      SubnetId: !Ref SubnetId
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: !Ref VolumeSize
+            VolumeType: gp3
+            Iops: 3000
+            Throughput: 125
+            DeleteOnTermination: true
+      InstanceMarketOptions:
+        !If
+          - UseSpot
+          - MarketType: spot
+            SpotOptions:
+              SpotInstanceType: one-time
+              InstanceInterruptionBehavior: terminate
+          - !Ref 'AWS::NoValue'
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+
+          # Environment variables
+          export INPUT_URL="${InputURL}"
+          export S3_OUTPUT="s3://${S3OutputBucket}/${S3OutputPrefix}"
+          export VALIDATE_SIGNATURES="${ValidateSignatures}"
+          export VALIDATE_EVENT_IDS="${ValidateEventIds}"
+          export COMPRESSION_LEVEL="${CompressionLevel}"
+          export SHUTDOWN_WHEN_DONE="${ShutdownWhenDone}"
+          export OUTPUT_DIR="/data/pb_data"
+
+          # Log everything
+          exec > >(tee -a /var/log/proton-beam-deployment.log)
+          exec 2>&1
+
+          echo "Starting Proton Beam deployment at $(date)"
+          echo "INPUT_URL: $INPUT_URL"
+          echo "S3_OUTPUT: $S3_OUTPUT"
+
+          # Download deployment script
+          cd /home/ubuntu
+          wget -q https://raw.githubusercontent.com/parres-hq/proton-beam/master/scripts/aws-deploy.sh
+          chmod +x aws-deploy.sh
+          chown ubuntu:ubuntu aws-deploy.sh
+
+          # Run as ubuntu user
+          su - ubuntu -c "
+            export INPUT_URL='${InputURL}'
+            export S3_OUTPUT='s3://${S3OutputBucket}/${S3OutputPrefix}'
+            export VALIDATE_SIGNATURES='${ValidateSignatures}'
+            export VALIDATE_EVENT_IDS='${ValidateEventIds}'
+            export COMPRESSION_LEVEL='${CompressionLevel}'
+            export SHUTDOWN_WHEN_DONE='${ShutdownWhenDone}'
+            export OUTPUT_DIR='/data/pb_data'
+            /home/ubuntu/aws-deploy.sh
+          "
+
+          echo "Deployment completed at $(date)"
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-instance'
+        - Key: Project
+          Value: ProtonBeam
+
+Outputs:
+  InstanceId:
+    Description: 'EC2 Instance ID'
+    Value: !Ref ProtonBeamInstance
+
+  PublicIp:
+    Description: 'Public IP address'
+    Value: !GetAtt ProtonBeamInstance.PublicIp
+
+  PublicDnsName:
+    Description: 'Public DNS name'
+    Value: !GetAtt ProtonBeamInstance.PublicDnsName
+
+  SSHCommand:
+    Description: 'SSH command to connect'
+    Value: !Sub 'ssh -i ${KeyName}.pem ubuntu@${ProtonBeamInstance.PublicIp}'
+
+  LogFileLocation:
+    Description: 'Location of deployment log on instance'
+    Value: '/var/log/proton-beam-deployment.log'
+
+  S3OutputLocation:
+    Description: 'S3 location for output files'
+    Value: !Sub 's3://${S3OutputBucket}/${S3OutputPrefix}'
+
+  S3ListCommand:
+    Description: 'Command to list output files'
+    Value: !Sub 'aws s3 ls s3://${S3OutputBucket}/${S3OutputPrefix}'
+

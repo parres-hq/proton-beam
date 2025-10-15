@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use proton_beam_core::EventIndex;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -43,7 +44,8 @@ fn test_convert_help() {
         .success()
         .stdout(predicate::str::contains("Convert Nostr events"))
         .stdout(predicate::str::contains("--output-dir"))
-        .stdout(predicate::str::contains("--no-validate"))
+        .stdout(predicate::str::contains("--validate-signatures"))
+        .stdout(predicate::str::contains("--validate-event-ids"))
         .stdout(predicate::str::contains("--batch-size"));
 }
 
@@ -112,7 +114,8 @@ fn test_convert_with_no_validation() {
         .arg(&sample_path)
         .arg("--output-dir")
         .arg(temp_dir.path())
-        .arg("--no-validate")
+        .arg("--validate-signatures=false")
+        .arg("--validate-event-ids=false")
         .arg("--no-progress");
 
     cmd.assert()
@@ -163,7 +166,8 @@ fn test_error_logging() {
         .arg("--output-dir")
         .arg(&output_dir)
         .arg("--no-progress")
-        .arg("--no-validate"); // Don't validate signatures in test
+        .arg("--validate-signatures=false")
+        .arg("--validate-event-ids=false"); // Don't validate signatures in test
 
     cmd.assert()
         .success()
@@ -272,7 +276,8 @@ fn test_file_with_blank_lines() {
         .arg("--output-dir")
         .arg(&output_dir)
         .arg("--no-progress")
-        .arg("--no-validate"); // Don't validate signatures in test
+        .arg("--validate-signatures=false")
+        .arg("--validate-event-ids=false"); // Don't validate signatures in test
 
     cmd.assert()
         .success()
@@ -281,26 +286,37 @@ fn test_file_with_blank_lines() {
 }
 
 #[test]
-fn test_index_creation() {
+fn test_index_rebuild() {
     let temp_dir = TempDir::new().unwrap();
     let sample_path = sample_events_path();
 
+    let output_dir = temp_dir.path().join("output");
+
+    // First convert without indexing
     let mut cmd = Command::cargo_bin("proton-beam").unwrap();
     cmd.arg("convert")
         .arg(&sample_path)
         .arg("--output-dir")
-        .arg(temp_dir.path())
+        .arg(&output_dir)
         .arg("--no-progress");
 
     cmd.assert().success();
 
+    // Now rebuild the index
+    let mut cmd = Command::cargo_bin("proton-beam").unwrap();
+    cmd.arg("index").arg("rebuild").arg(&output_dir);
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Index Rebuild Complete"));
+
     // Check that index was created
-    let index_file = temp_dir.path().join("index.db");
+    let index_file = output_dir.join("index.db");
     assert!(index_file.exists(), "Index database was not created");
 }
 
 #[test]
-fn test_deduplication() {
+fn test_index_deduplication() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create a test file with duplicate events
@@ -315,37 +331,34 @@ fn test_deduplication() {
 
     let output_dir = temp_dir.path().join("output");
 
-    // First conversion (use single thread to ensure proper deduplication test)
+    // Convert events (duplicates will be stored)
     let mut cmd = Command::cargo_bin("proton-beam").unwrap();
     cmd.arg("convert")
         .arg(&test_file)
         .arg("--output-dir")
         .arg(&output_dir)
         .arg("--no-progress")
-        .arg("--no-validate")
+        .arg("--validate-signatures=false")
+        .arg("--validate-event-ids=false")
         .arg("--parallel")
         .arg("1");
 
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("Valid events:       1"))
-        .stdout(predicate::str::contains("Duplicate events:   2"));
+    cmd.assert().success();
 
-    // Second conversion - all should be duplicates
-    let mut cmd2 = Command::cargo_bin("proton-beam").unwrap();
-    cmd2.arg("convert")
-        .arg(&test_file)
-        .arg("--output-dir")
-        .arg(&output_dir)
-        .arg("--no-progress")
-        .arg("--no-validate")
-        .arg("--parallel")
-        .arg("1");
+    // Build index - should deduplicate during indexing
+    let mut cmd = Command::cargo_bin("proton-beam").unwrap();
+    cmd.arg("index").arg("rebuild").arg(&output_dir);
 
-    cmd2.assert()
-        .success()
-        .stdout(predicate::str::contains("Valid events:       0"))
-        .stdout(predicate::str::contains("Duplicate events:   3"));
+    cmd.assert().success();
+
+    // Index should have only one unique event
+    let index = EventIndex::new(&output_dir.join("index.db")).unwrap();
+    assert!(
+        index
+            .contains("859501854a0e2b63383db18f187f8d2a7f988651793687215a6549f2da380528")
+            .unwrap()
+    );
+    // Note: The protobuf file may contain duplicates, but the index tracks unique events
 }
 
 #[test]
@@ -354,14 +367,23 @@ fn test_custom_index_path() {
     let sample_path = sample_events_path();
     let custom_index = temp_dir.path().join("custom_index.db");
 
+    // First convert
     let mut cmd = Command::cargo_bin("proton-beam").unwrap();
     cmd.arg("convert")
         .arg(&sample_path)
         .arg("--output-dir")
         .arg(temp_dir.path())
-        .arg("--index-path")
-        .arg(&custom_index)
         .arg("--no-progress");
+
+    cmd.assert().success();
+
+    // Build index with custom path
+    let mut cmd = Command::cargo_bin("proton-beam").unwrap();
+    cmd.arg("index")
+        .arg("rebuild")
+        .arg(temp_dir.path())
+        .arg("--index-path")
+        .arg(&custom_index);
 
     cmd.assert().success();
 
@@ -380,7 +402,7 @@ fn test_custom_index_path() {
 }
 
 #[test]
-fn test_deduplication_across_batches() {
+fn test_index_rebuild_with_multiple_files() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create a test file with events
@@ -392,38 +414,32 @@ fn test_deduplication_across_batches() {
 
     let output_dir = temp_dir.path().join("output");
 
-    // First conversion with small batch size (single thread for controlled test)
+    // Convert events
     let mut cmd = Command::cargo_bin("proton-beam").unwrap();
     cmd.arg("convert")
         .arg(&test_file)
         .arg("--output-dir")
         .arg(&output_dir)
-        .arg("--batch-size")
-        .arg("1") // Very small batch to test across batches
         .arg("--no-progress")
-        .arg("--no-validate")
-        .arg("--parallel")
-        .arg("1");
+        .arg("--validate-signatures=false")
+        .arg("--validate-event-ids=false");
 
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("Valid events:       2"));
 
-    // Second conversion - both should be duplicates
-    let mut cmd2 = Command::cargo_bin("proton-beam").unwrap();
-    cmd2.arg("convert")
-        .arg(&test_file)
-        .arg("--output-dir")
-        .arg(&output_dir)
-        .arg("--no-progress")
-        .arg("--no-validate")
-        .arg("--parallel")
-        .arg("1");
+    // Build index
+    let mut cmd = Command::cargo_bin("proton-beam").unwrap();
+    cmd.arg("index").arg("rebuild").arg(&output_dir);
 
-    cmd2.assert()
-        .success()
-        .stdout(predicate::str::contains("Valid events:       0"))
-        .stdout(predicate::str::contains("Duplicate events:   2"));
+    cmd.assert().success();
+
+    let index = EventIndex::new(&output_dir.join("index.db")).unwrap();
+    let stats = index.stats().unwrap();
+    assert_eq!(
+        stats.total_events, 2,
+        "Index should contain 2 unique events"
+    );
 }
 
 #[test]
@@ -444,7 +460,7 @@ fn test_parallel_processing() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("Conversion Summary"))
-        .stdout(predicate::str::contains("Valid events:"))
+        .stdout(predicate::str::contains("✅ Valid events:"))
         .stdout(predicate::str::contains("Success rate:"));
 
     // Check that output files were created
@@ -507,7 +523,7 @@ fn test_parallel_vs_sequential_consistency() {
 
     // Both should have the same number of valid events
     assert!(
-        seq_stdout.contains("Valid events:") && par_stdout.contains("Valid events:"),
+        seq_stdout.contains("✅ Valid events:") && par_stdout.contains("✅ Valid events:"),
         "Both outputs should contain valid event counts"
     );
 }

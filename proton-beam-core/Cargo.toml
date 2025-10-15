@@ -32,6 +32,11 @@ rusqlite = { workspace = true }
 # Compression
 flate2 = { workspace = true }
 
+# Cryptography / Hashing
+secp256k1 = { version = "0.28", features = ["global-context", "serde"] }
+sha2 = "0.10"
+hex = "0.4"
+
 [build-dependencies]
 prost-build = { workspace = true }
 

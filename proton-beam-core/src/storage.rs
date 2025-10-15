@@ -35,27 +35,16 @@ use std::io::{Read, Write};
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn write_event_delimited<W: Write>(writer: &mut W, event: &ProtoEvent) -> Result<()> {
-    // Encode the event to bytes
-    let mut buf = Vec::new();
-    event.encode(&mut buf)?;
-
-    // Write length as varint
-    let mut len_buf = Vec::new();
-    prost::encoding::encode_varint(buf.len() as u64, &mut len_buf);
-    writer.write_all(&len_buf)?;
-
-    // Write event data
-    writer.write_all(&buf)?;
-
-    Ok(())
+    write_event_delimited_with_buf(writer, event, &mut DelimitedBuffer::default())
 }
 
 /// Write multiple events in length-delimited format
 ///
 /// This is a convenience function that writes multiple events in one call.
 pub fn write_events_delimited<W: Write>(writer: &mut W, events: &[ProtoEvent]) -> Result<()> {
+    let mut buffer = DelimitedBuffer::default();
     for event in events {
-        write_event_delimited(writer, event)?;
+        write_event_delimited_with_buf(writer, event, &mut buffer)?;
     }
     Ok(())
 }
@@ -159,7 +148,7 @@ impl<R: Read> Iterator for EventIterator<R> {
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn create_gzip_encoder<W: Write>(writer: W) -> GzEncoder<W> {
-    GzEncoder::new(writer, Compression::default())
+    create_gzip_encoder_with_level(writer, 6)
 }
 
 /// Create a gzip decoder wrapper for reading compressed protobuf files
@@ -183,6 +172,32 @@ pub fn create_gzip_encoder<W: Write>(writer: W) -> GzEncoder<W> {
 /// ```
 pub fn create_gzip_decoder<R: Read>(reader: R) -> GzDecoder<R> {
     GzDecoder::new(reader)
+}
+
+pub fn create_gzip_encoder_with_level<W: Write>(writer: W, level: u32) -> GzEncoder<W> {
+    GzEncoder::new(writer, Compression::new(level))
+}
+
+#[derive(Default)]
+struct DelimitedBuffer {
+    len_buf: Vec<u8>,
+    event_buf: Vec<u8>,
+}
+
+fn write_event_delimited_with_buf<W: Write>(
+    writer: &mut W,
+    event: &ProtoEvent,
+    buf: &mut DelimitedBuffer,
+) -> Result<()> {
+    buf.event_buf.clear();
+    event.encode(&mut buf.event_buf)?;
+
+    buf.len_buf.clear();
+    prost::encoding::encode_varint(buf.event_buf.len() as u64, &mut buf.len_buf);
+    writer.write_all(&buf.len_buf)?;
+    writer.write_all(&buf.event_buf)?;
+
+    Ok(())
 }
 
 /// Read a varint from a reader

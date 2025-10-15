@@ -2,7 +2,7 @@
 
 > Convert Nostr events from JSON to Protocol Buffers at lightspeed
 
-[![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Proton Beam is a highly experimental (and will eventually be a high-performance) Rust tool for converting [Nostr](https://nostr.com) events from JSON format to Protocol Buffers (protobuf). It provides both a CLI tool for batch processing and a daemon for real-time relay monitoring.
@@ -20,6 +20,7 @@ Proton Beam is a highly experimental (and will eventually be a high-performance)
 - 🌐 **Auto-discovery**: Automatically discover and connect to new relays
 - 📊 **Progress Tracking**: Beautiful progress bars for batch operations
 - 🔀 **Parallel Processing**: Multi-threaded conversion for maximum throughput
+- ☁️ **AWS S3 Support**: Direct upload to S3 buckets (optional feature)
 
 ## Quick Start
 
@@ -58,16 +59,14 @@ Specify output directory:
 proton-beam convert events.jsonl --output-dir ./pb_data
 ```
 
-Custom index location:
-
-```bash
-proton-beam convert events.jsonl --index-path ./my_index.db
-```
-
 Skip validation for faster processing:
 
 ```bash
-proton-beam convert events.jsonl --no-validate
+# Skip both signature and ID validation
+proton-beam convert events.jsonl --validate-signatures=false --validate-event-ids=false
+
+# Or skip just signatures
+proton-beam convert events.jsonl --validate-signatures=false
 ```
 
 Disable preprocessing filter (enabled by default):
@@ -81,6 +80,41 @@ Parallel processing with multiple threads:
 ```bash
 proton-beam convert events.jsonl --parallel 8
 ```
+
+Adjust compression level:
+
+```bash
+proton-beam convert events.jsonl --compression-level 9
+```
+
+Upload to S3 after conversion (requires `--features s3`):
+
+```bash
+# Build with S3 support
+cargo build --release --features s3 -p proton-beam-cli
+
+# Convert and upload
+proton-beam convert events.jsonl --s3-output s3://my-bucket/output/
+```
+
+### AWS Deployment
+
+For processing large datasets on AWS EC2 with automatic S3 upload:
+
+```bash
+# Set your configuration
+export INPUT_URL="https://example.com/data.jsonl"
+export S3_OUTPUT_BUCKET="my-bucket"
+export KEY_NAME="my-ec2-keypair"
+
+# Deploy via CloudFormation
+./scripts/deploy-cloudformation.sh
+```
+
+**Complete guides:**
+- [Quick Start](QUICKSTART_CLOUDFORMATION.md) - Get started in 3 steps
+- [Complete Guide](CLOUDFORMATION_GUIDE.md) - Full documentation
+- [1.2TB Dataset Guide](DEPLOYMENT_1.2TB.md) - Specific configuration example
 
 ### Daemon Usage
 
@@ -290,7 +324,7 @@ All code is automatically checked on pull requests:
 - ✅ Lint checks (`clippy`)
 - ✅ Documentation builds
 - ✅ Tests on Linux, macOS, and Windows
-- ✅ MSRV compatibility (Rust 1.70+)
+- ✅ MSRV compatibility (Rust 1.90+)
 - ✅ Security audit
 - 📊 Performance benchmarks
 

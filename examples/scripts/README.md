@@ -294,7 +294,7 @@ sudo systemctl enable --now nostr-backup.timer
 Create a Dockerfile:
 
 ```dockerfile
-FROM rust:1.70 as builder
+FROM rust:1.90 as builder
 WORKDIR /app
 COPY . .
 RUN cargo build --release -p proton-beam-cli

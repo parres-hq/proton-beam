@@ -5,6 +5,9 @@ use std::io::{BufRead, BufReader, Lines};
 use std::path::Path;
 use std::sync::OnceLock;
 
+// Buffer size for input file reading (1MB for optimal performance)
+const INPUT_BUFFER_SIZE: usize = 1024 * 1024;
+
 /// Regex to extract kind value from JSON
 /// Matches: "kind": 123, "kind":456, etc.
 static KIND_REGEX: OnceLock<Regex> = OnceLock::new();
@@ -40,13 +43,17 @@ impl InputReader {
         }
 
         let file = File::open(path).context(format!("Failed to open input file: {}", input))?;
-        let reader = BufReader::with_capacity(1024 * 1024, file); // 1MB buffer
+        let reader = BufReader::with_capacity(INPUT_BUFFER_SIZE, file);
 
-        Ok(Self {
+        Ok(Self::from_reader(reader, filter_invalid_kinds))
+    }
+
+    pub fn from_reader(reader: BufReader<File>, filter_invalid_kinds: bool) -> Self {
+        Self {
             reader: reader.lines(),
             filter_invalid_kinds,
             filtered_count: 0,
-        })
+        }
     }
 
     /// Get the number of lines filtered out due to invalid kinds

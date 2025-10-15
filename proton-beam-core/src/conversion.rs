@@ -21,7 +21,7 @@ impl From<nostr_sdk::Event> for ProtoEvent {
                 .tags
                 .iter()
                 .map(|tag| Tag {
-                    values: tag.clone().to_vec().iter().map(|s| s.to_string()).collect(),
+                    values: tag.clone().into_iter().map(|v| v.to_string()).collect(),
                 })
                 .collect(),
             content: nostr_event.content.clone(),
@@ -46,7 +46,7 @@ impl TryFrom<&str> for ProtoEvent {
     type Error = crate::error::Error;
 
     fn try_from(json: &str) -> Result<Self> {
-        // Parse JSON to serde_json::Value first for validation
+        // Parse JSON to serde_json::Value first for validation (single parse path)
         let value: serde_json::Value = serde_json::from_str(json)
             .map_err(|e| crate::error::Error::Conversion(format!("Invalid JSON: {}", e)))?;
 
@@ -93,8 +93,8 @@ impl TryFrom<&str> for ProtoEvent {
             }
         }
 
-        // Parse JSON using nostr-sdk for proper validation
-        let nostr_event: nostr_sdk::Event = serde_json::from_str(json).map_err(|e| {
+        // Parse into nostr-sdk::Event using the already materialized Value
+        let nostr_event: nostr_sdk::Event = serde_json::from_value(value).map_err(|e| {
             // Enhance error message with more context
             let msg = e.to_string();
 
@@ -213,13 +213,6 @@ pub fn proto_to_json(event: &ProtoEvent) -> Result<String> {
 /// Convert a Protobuf ProtoEvent to a nostr-sdk Event for validation
 ///
 /// This is an internal helper function used by the validation module.
-pub(crate) fn proto_to_nostr_event(event: &ProtoEvent) -> Result<nostr_sdk::Event> {
-    // First convert to JSON, then parse with nostr-sdk
-    // This ensures we use nostr-sdk's proper parsing
-    let json = proto_to_json(event)?;
-    Ok(serde_json::from_str(&json)?)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

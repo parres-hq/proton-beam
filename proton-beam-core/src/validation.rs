@@ -2,9 +2,13 @@
 
 use crate::{
     ProtoEvent,
-    conversion::proto_to_nostr_event,
     error::{Result, ValidationError},
 };
+use hex::FromHex;
+use secp256k1::schnorr::Signature;
+use secp256k1::{Message, Secp256k1, XOnlyPublicKey};
+use serde_json::json;
+use sha2::{Digest, Sha256};
 
 /// Validate a Protobuf ProtoEvent
 ///
@@ -24,17 +28,11 @@ use crate::{
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn validate_event(event: &ProtoEvent) -> Result<()> {
-    // Basic validation
     validate_basic_fields(event)?;
 
-    // Convert to nostr-sdk event for cryptographic validation
-    let nostr_event = proto_to_nostr_event(event)?;
-
-    // Verify event ID (SHA-256 hash of serialized content)
-    validate_event_id(&nostr_event, &event.id)?;
-
-    // Verify Schnorr signature
-    validate_signature(&nostr_event)?;
+    let hash = compute_event_hash(event)?;
+    validate_event_id_from_hash(event, &hash)?;
+    validate_signature_from_hash(event, &hash)?;
 
     Ok(())
 }
@@ -85,12 +83,59 @@ pub fn validate_basic_fields(event: &ProtoEvent) -> Result<()> {
 }
 
 /// Validate that the event ID matches the computed hash
-fn validate_event_id(nostr_event: &nostr_sdk::Event, expected_id: &str) -> Result<()> {
-    let computed_id = nostr_event.id.to_hex();
+/// Check if a string is valid hexadecimal
+fn is_hex(s: &str) -> bool {
+    s.chars().all(|c| c.is_ascii_hexdigit())
+}
 
-    if computed_id != expected_id {
+pub fn validate_signature_only(event: &ProtoEvent) -> Result<()> {
+    validate_basic_fields(event)?;
+    let hash = compute_event_hash(event)?;
+    validate_signature_from_hash(event, &hash)
+}
+
+pub fn validate_event_id_only(event: &ProtoEvent) -> Result<()> {
+    let hash = compute_event_hash(event)?;
+    validate_event_id_from_hash(event, &hash)
+}
+
+/// Compute the SHA-256 hash of an event following Nostr's canonical format
+///
+/// This hash is used for both event ID verification and signature verification.
+/// Exposing this allows callers to compute the hash once and reuse it for both validations.
+pub fn compute_event_hash(event: &ProtoEvent) -> Result<[u8; 32]> {
+    let tags: Vec<Vec<&str>> = event
+        .tags
+        .iter()
+        .map(|tag| tag.values.iter().map(|v| v.as_str()).collect())
+        .collect();
+
+    let canonical = json!([
+        0,
+        event.pubkey,
+        event.created_at,
+        event.kind,
+        tags,
+        event.content,
+    ]);
+
+    let bytes = serde_json::to_vec(&canonical)?;
+    let digest = Sha256::digest(&bytes);
+    let mut hash = [0u8; 32];
+    hash.copy_from_slice(&digest);
+    Ok(hash)
+}
+
+/// Validate event ID against a pre-computed hash
+///
+/// This is useful when you've already computed the hash for signature verification
+/// and want to avoid recomputing it for ID verification.
+pub fn validate_event_id_from_hash(event: &ProtoEvent, hash: &[u8; 32]) -> Result<()> {
+    let computed_id = hex::encode(hash);
+
+    if computed_id != event.id {
         return Err(ValidationError::EventIdMismatch {
-            expected: expected_id.to_string(),
+            expected: event.id.clone(),
             actual: computed_id,
         }
         .into());
@@ -99,21 +144,38 @@ fn validate_event_id(nostr_event: &nostr_sdk::Event, expected_id: &str) -> Resul
     Ok(())
 }
 
-/// Validate the Schnorr signature
-fn validate_signature(nostr_event: &nostr_sdk::Event) -> Result<()> {
-    // Use nostr-sdk's built-in signature verification
-    if nostr_event.verify().is_err() {
-        return Err(
-            ValidationError::InvalidSignature("Signature verification failed".to_string()).into(),
-        );
-    }
+/// Validate signature against a pre-computed hash
+///
+/// This is useful when you've already computed the hash for ID verification
+/// and want to avoid recomputing it for signature verification.
+pub fn validate_signature_from_hash(event: &ProtoEvent, hash: &[u8; 32]) -> Result<()> {
+    let signature = parse_signature(&event.sig)?;
+    let pubkey = parse_pubkey(&event.pubkey)?;
+    let message = Message::from_digest_slice(hash).expect("hash length is 32 bytes");
+
+    let secp = Secp256k1::verification_only();
+    secp.verify_schnorr(&signature, &message, &pubkey)
+        .map_err(|_| {
+            ValidationError::InvalidSignature("Signature verification failed".to_string())
+        })?;
 
     Ok(())
 }
 
-/// Check if a string is valid hexadecimal
-fn is_hex(s: &str) -> bool {
-    s.chars().all(|c| c.is_ascii_hexdigit())
+fn parse_signature(sig_hex: &str) -> Result<Signature> {
+    let bytes =
+        Vec::from_hex(sig_hex).map_err(|e| ValidationError::SignatureParse(e.to_string()))?;
+    let signature = Signature::from_slice(&bytes)
+        .map_err(|e| ValidationError::SignatureParse(e.to_string()))?;
+    Ok(signature)
+}
+
+fn parse_pubkey(pubkey_hex: &str) -> Result<XOnlyPublicKey> {
+    let bytes =
+        Vec::from_hex(pubkey_hex).map_err(|e| ValidationError::PubkeyParse(e.to_string()))?;
+    let pubkey = XOnlyPublicKey::from_slice(&bytes)
+        .map_err(|e| ValidationError::PubkeyParse(e.to_string()))?;
+    Ok(pubkey)
 }
 
 #[cfg(test)]

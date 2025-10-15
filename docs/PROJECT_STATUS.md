@@ -142,9 +142,12 @@ Overall Progress:          ██████████░░░░░░░�
 - ✅ `proton-beam convert <file>` - Process `.jsonl` files
 - ✅ `proton-beam convert -` - Read from stdin
 - ✅ `--output-dir <path>` - Custom output location
-- ✅ `--no-validate` - Skip validation for speed
-- ✅ `--batch-size <n>` - Configurable batch size (default: 500)
+- ✅ `--validate-signatures=false` / `--validate-event-ids=false` - Skip validation for speed
+- ✅ `--batch-size <n>` - Configurable batch size (default: 1000)
 - ✅ `--verbose` - Detailed logging
+- ✅ `--parallel <n>` - Multi-threaded processing
+- ✅ `--filter-invalid-kinds` - Preprocessing filter (enabled by default)
+- ✅ `--compression-level <0-9>` - Adjustable compression (default: 6)
 - ✅ `--no-progress` - Disable progress bars
 
 **Usage Examples:**
@@ -159,7 +162,7 @@ cat events.jsonl | proton-beam convert -
 proton-beam convert events.jsonl --output-dir ./pb_data --batch-size 1000
 
 # Skip validation for speed
-proton-beam convert events.jsonl --no-validate
+proton-beam convert events.jsonl --validate-signatures=false --validate-event-ids=false
 ```
 
 **Output Structure:**
@@ -189,7 +192,7 @@ proton-beam convert events.jsonl --no-validate
 - ✅ Implement batch inserts for performance
 - ✅ Write tests for index operations
 - ✅ Benchmark deduplication performance
-- ✅ Add `--index-path` flag to CLI
+- ✅ Add `--index-path` flag to Index CLI command
 - ✅ Add index statistics/reporting
 
 **Deliverables:**
@@ -243,7 +246,7 @@ impl EventIndex {
 
 **CLI Integration:**
 - Index automatically created in output directory as `index.db`
-- Custom path supported via `--index-path` option
+- Custom path supported via `--index-path` option in `index rebuild` command
 - Deduplication enabled by default with info-level logging
 - Duplicate events do not cause exit failures
 
@@ -476,7 +479,7 @@ cat events.jsonl | proton-beam convert -
 proton-beam convert events.jsonl --output-dir ./pb_data
 
 # Skip validation (faster)
-proton-beam convert events.jsonl --no-validate
+proton-beam convert events.jsonl --validate-signatures=false --validate-event-ids=false
 
 # Large batches for performance
 proton-beam convert events.jsonl --batch-size 2000

@@ -60,19 +60,11 @@ pub enum ValidationError {
     #[error("Invalid kind: {0}")]
     InvalidKind(i32),
 
-    /// Nostr SDK error
-    #[error("Nostr SDK error: {0}")]
-    NostrSdk(String),
-}
+    /// Schnorr signature parsing error
+    #[error("Invalid signature: {0}")]
+    SignatureParse(String),
 
-impl From<nostr_sdk::event::Error> for ValidationError {
-    fn from(err: nostr_sdk::event::Error) -> Self {
-        ValidationError::NostrSdk(err.to_string())
-    }
-}
-
-impl From<nostr_sdk::key::Error> for ValidationError {
-    fn from(err: nostr_sdk::key::Error) -> Self {
-        ValidationError::NostrSdk(err.to_string())
-    }
+    /// Public key parsing error
+    #[error("Invalid public key: {0}")]
+    PubkeyParse(String),
 }
