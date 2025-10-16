@@ -745,11 +745,20 @@ fn find_chunk_boundaries(path: &Path, num_chunks: usize) -> Result<Vec<(u64, u64
         let target = chunk_size * (i + 1) as u64;
         reader.seek(SeekFrom::Start(target))?;
 
-        // Read to next newline (this line belongs to current chunk)
-        let mut buf = String::new();
-        reader.read_line(&mut buf)?;
+        // Read bytes until we find a newline, handling invalid UTF-8
+        // We read raw bytes to avoid UTF-8 validation errors when seeking to arbitrary positions
+        let mut byte_buf = vec![0u8; 8192]; // 8KB buffer
+        let bytes_read = reader.read(&mut byte_buf)?;
 
-        let chunk_end = reader.stream_position()?;
+        // Find the first newline in the buffer
+        let newline_pos = byte_buf[..bytes_read]
+            .iter()
+            .position(|&b| b == b'\n')
+            .unwrap_or(bytes_read - 1);
+
+        // Seek to just after the newline
+        let chunk_end = target + newline_pos as u64 + 1;
+        reader.seek(SeekFrom::Start(chunk_end))?;
 
         boundaries.push((current_start, chunk_end));
         current_start = chunk_end; // Next chunk starts after this line

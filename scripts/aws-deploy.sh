@@ -177,7 +177,7 @@ download_input() {
 
         # Use pv for progress if file is large
         if command -v pv &> /dev/null; then
-            pv "$DOWNLOAD_FILE" | zstd -d -o "$INPUT_FILE"
+            pv "$DOWNLOAD_FILE" | zstd -d > "$INPUT_FILE"
         else
             zstd -d "$DOWNLOAD_FILE" -o "$INPUT_FILE"
         fi
