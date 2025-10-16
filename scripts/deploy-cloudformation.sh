@@ -89,7 +89,6 @@ VALIDATE_SIGNATURES=$(get_param VALIDATE_SIGNATURES "Validate signatures (true/f
 VALIDATE_EVENT_IDS=$(get_param VALIDATE_EVENT_IDS "Validate event IDs (true/false)" "true")
 COMPRESSION_LEVEL=$(get_param COMPRESSION_LEVEL "Compression level (0-9)" "6")
 SHUTDOWN_WHEN_DONE=$(get_param SHUTDOWN_WHEN_DONE "Auto-shutdown when done (true/false)" "true")
-USE_SPOT_INSTANCE=$(get_param USE_SPOT_INSTANCE "Use spot instance (true/false)" "false")
 
 echo ""
 echo -e "${GREEN}Creating CloudFormation stack...${NC}"
@@ -114,7 +113,6 @@ aws cloudformation create-stack \
         ParameterKey=ValidateEventIds,ParameterValue="$VALIDATE_EVENT_IDS" \
         ParameterKey=CompressionLevel,ParameterValue="$COMPRESSION_LEVEL" \
         ParameterKey=ShutdownWhenDone,ParameterValue="$SHUTDOWN_WHEN_DONE" \
-        ParameterKey=UseSpotInstance,ParameterValue="$USE_SPOT_INSTANCE" \
     --tags \
         Key=Project,Value=ProtonBeam \
         Key=ManagedBy,Value=CloudFormation

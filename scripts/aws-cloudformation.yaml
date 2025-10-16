@@ -79,17 +79,6 @@ Parameters:
       - 'false'
     Description: 'Auto-shutdown instance when processing completes'
 
-  UseSpotInstance:
-    Type: String
-    Default: 'false'
-    AllowedValues:
-      - 'true'
-      - 'false'
-    Description: 'Use Spot instance for 70% cost savings (may be interrupted)'
-
-Conditions:
-  UseSpot: !Equals [!Ref UseSpotInstance, 'true']
-
 Resources:
   ProtonBeamSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -166,16 +155,7 @@ Resources:
             VolumeSize: !Ref VolumeSize
             VolumeType: gp3
             Iops: 3000
-            Throughput: 125
             DeleteOnTermination: true
-      InstanceMarketOptions:
-        !If
-          - UseSpot
-          - MarketType: spot
-            SpotOptions:
-              SpotInstanceType: one-time
-              InstanceInterruptionBehavior: terminate
-          - !Ref 'AWS::NoValue'
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash

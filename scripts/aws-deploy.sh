@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Proton Beam AWS Deployment Script
+# This script runs on the EC2 instance created by the CloudFormation template
 # This script sets up an EC2 instance, downloads data, converts it, and uploads to S3
 
 # Colors for output
@@ -86,6 +87,7 @@ install_dependencies() {
         git \
         pkg-config \
         libssl-dev \
+        protobuf-compiler \
         awscli \
         zstd \
         pigz \
