@@ -1442,7 +1442,8 @@ fn rebuild_index(pb_dir: &Path, index_path: &Path) -> Result<()> {
     }
 
     // Use bulk mode for significantly faster initial index building
-    let mut index = EventIndex::new_bulk_mode(index_path).context("Failed to create event index")?;
+    let mut index =
+        EventIndex::new_bulk_mode(index_path).context("Failed to create event index")?;
     info!("Using bulk insert mode with optimized SQLite settings");
 
     // Find all .pb.gz files in the directory

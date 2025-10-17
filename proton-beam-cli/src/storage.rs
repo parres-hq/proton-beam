@@ -59,8 +59,7 @@ impl ErrorCategory {
             Self::InvalidTagValue
         } else if msg.contains("kind") && msg.contains("out of valid range") {
             Self::InvalidKind
-        } else if msg.contains("Signature verification failed")
-            || msg.contains("Invalid signature")
+        } else if msg.contains("Signature verification failed") || msg.contains("Invalid signature")
         {
             Self::InvalidSignature
         } else if msg.contains("Event ID") || msg.contains("EventIdMismatch") {
