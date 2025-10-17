@@ -2,16 +2,43 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use proton_beam_core::EventIndex;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
-/// Helper to get the path to the sample events file
-fn sample_events_path() -> PathBuf {
+fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
+        .to_path_buf()
+}
+
+fn sample_events_path() -> PathBuf {
+    workspace_root()
         .join("examples")
         .join("sample_events.jsonl")
+}
+
+fn find_log_files(dir: &Path) -> Vec<PathBuf> {
+    let mut logs: Vec<PathBuf> = fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.contains("proton-beam") && name.ends_with(".log"))
+                    .unwrap_or(false)
+        })
+        .collect();
+    logs.sort();
+    logs
+}
+
+fn read_latest_log(dir: &Path) -> Option<String> {
+    let logs = find_log_files(dir);
+    logs.last().and_then(|path| fs::read_to_string(path).ok())
 }
 
 #[test]
@@ -99,9 +126,12 @@ fn test_convert_sample_events() {
 
     assert!(!pb_files.is_empty(), "No .pb.gz files were created");
 
-    // Check that log file exists
-    let log_file = temp_dir.path().join("proton-beam.log");
-    assert!(log_file.exists(), "proton-beam.log was not created");
+    // Check that log file exists (may be rotated)
+    let log_files = find_log_files(temp_dir.path());
+    assert!(
+        !log_files.is_empty(),
+        "Conversion should create proton-beam*.log"
+    );
 }
 
 #[test]
@@ -171,19 +201,22 @@ fn test_error_logging() {
 
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("Invalid events:").and(predicate::str::contains("1")));
+        .stdout(predicate::str::contains("Invalid events:").and(predicate::str::contains("1")))
+        .stdout(predicate::str::contains("Error Breakdown:")); // Check that error categorization is shown
 
     // Check that errors were logged to the log file (not JSONL)
-    let log_file = output_dir.join("proton-beam.log");
-    assert!(log_file.exists(), "proton-beam.log should exist");
-
-    // Verify the log file has content
-    let content = fs::read_to_string(&log_file).unwrap();
-    assert!(!content.is_empty(), "Log file should not be empty");
+    let log_files = find_log_files(&output_dir);
     assert!(
-        content.contains("parse_error"),
-        "Log should contain parse error"
+        !log_files.is_empty(),
+        "At least one proton-beam*.log file should exist"
     );
+
+    // Verify the latest log file has content
+    let content = read_latest_log(&output_dir).expect("Log file should be readable");
+    assert!(!content.is_empty(), "Log file should not be empty");
+
+    // Parse errors are now logged at DEBUG level, but the error stats are shown in stdout
+    // The test above already verifies the error was counted in the summary
 }
 
 #[test]

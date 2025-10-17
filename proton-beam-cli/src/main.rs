@@ -6,13 +6,15 @@ use proton_beam_core::{
     validate_signature_from_hash,
 };
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 
 // Performance tuning constants
 const LINE_COUNT_BUFFER_SIZE: usize = 1024 * 1024; // 1MB for line counting
@@ -47,7 +49,7 @@ mod storage;
 mod s3;
 
 use input::InputReader;
-use storage::StorageManager;
+use storage::{ErrorStats, LogErrorContext, StorageManager};
 
 #[derive(Parser, Debug)]
 #[command(name = "proton-beam")]
@@ -111,6 +113,25 @@ enum Commands {
         s3_output: Option<String>,
     },
 
+    /// Merge temporary protobuf files from a parallel conversion
+    Merge {
+        /// Output directory containing the tmp/ subdirectory
+        #[arg(value_name = "OUTPUT_DIR")]
+        output_dir: PathBuf,
+
+        /// Compression level (0-9, default: 6)
+        #[arg(long, value_parser = clap::value_parser!(u32).range(0..=9), default_value_t = 6)]
+        compression_level: u32,
+
+        /// Show detailed progress information
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Delete temp directory after successful merge
+        #[arg(long)]
+        cleanup: bool,
+    },
+
     /// Build or rebuild the event index from protobuf files
     Index {
         #[command(subcommand)]
@@ -158,7 +179,7 @@ impl ConversionStats {
         }
     }
 
-    fn print_summary(&self) {
+    fn print_summary(&self, error_stats: Option<&ErrorStats>) {
         println!("\n📊 Conversion Summary:");
         println!("  Total lines processed: {}", self.total_lines);
         println!("  ✅ Valid events:       {}", self.valid_events);
@@ -173,6 +194,11 @@ impl ConversionStats {
             0.0
         };
         println!("  Success rate:         {:.1}%", success_rate);
+
+        // Print error breakdown if available
+        if let Some(stats) = error_stats {
+            stats.print_summary();
+        }
     }
 }
 
@@ -181,6 +207,53 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Merge {
+            output_dir,
+            compression_level,
+            verbose,
+            cleanup,
+        } => {
+            // Initialize logging
+            init_logging(verbose, &output_dir);
+
+            let temp_dir = output_dir.join("tmp");
+
+            if !temp_dir.exists() {
+                anyhow::bail!(
+                    "Temp directory does not exist: {}\nExpected to find thread_*.pb.gz.tmp files there.",
+                    temp_dir.display()
+                );
+            }
+
+            println!("🔄 Proton Beam - Merge Temporary Files");
+            println!("   Output: {}", output_dir.display());
+            println!("   Temp dir: {}", temp_dir.display());
+            println!("   Compression: {}", compression_level);
+            println!();
+
+            info!("Starting merge process...");
+            info!("Output directory: {}", output_dir.display());
+            info!("Temp directory: {}", temp_dir.display());
+
+            // Merge temporary files
+            merge_temp_files(&output_dir, &temp_dir, compression_level)?;
+
+            info!("Merge complete!");
+            println!("\n✅ Merge complete!");
+
+            // Cleanup if requested
+            if cleanup {
+                println!("🧹 Cleaning up temp directory...");
+                info!("Removing temp directory: {}", temp_dir.display());
+                std::fs::remove_dir_all(&temp_dir).context("Failed to remove temp directory")?;
+                println!("✅ Temp directory removed");
+            } else {
+                println!(
+                    "\n💡 Tip: Run with --cleanup to remove temp files after successful merge"
+                );
+            }
+        }
+
         Commands::Convert {
             input,
             output_dir,
@@ -202,6 +275,21 @@ async fn main() -> Result<()> {
 
             // Initialize logging (creates log file in output_dir)
             init_logging(verbose, &output_dir);
+
+            // Check available disk space (warn if low)
+            let file_size = std::fs::metadata(&input).map(|m| m.len()).unwrap_or(0);
+            if file_size > 0 {
+                // Estimate output size (conservative: 30-50% of input depending on compression)
+                let estimated_output = file_size / 2;
+                info!(
+                    "Input file size: {:.2} GB, estimated output: {:.2} GB",
+                    file_size as f64 / 1_000_000_000.0,
+                    estimated_output as f64 / 1_000_000_000.0
+                );
+
+                // Note: Checking available space is platform-specific and requires additional deps
+                // For now, we log the estimates so users can verify manually
+            }
 
             // Determine number of threads
             let num_threads = parallel.unwrap_or_else(|| {
@@ -348,39 +436,85 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
+
 fn init_logging(verbose: bool, output_dir: &Path) {
-    use std::fs::OpenOptions;
     use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
-    // Create log file in output directory
-    let log_path = output_dir.join("proton-beam.log");
-    let log_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .expect("Failed to open log file");
+    // Ensure output directory exists for log files
+    if let Err(e) = fs::create_dir_all(output_dir) {
+        eprintln!(
+            "⚠️  Failed to create log directory {}: {}",
+            output_dir.display(),
+            e
+        );
+        // Continue without file logging (stderr layer will still initialize)
+    }
 
-    // Determine log level for file
+    // Determine log level for file output
     let file_filter = if verbose {
         LevelFilter::DEBUG
     } else {
         LevelFilter::INFO
     };
 
-    // Create a formatter for the log file (all logs go here)
-    let file_layer = fmt::layer()
-        .with_writer(std::sync::Arc::new(log_file))
-        .with_ansi(false)
-        .with_target(false)
-        .with_thread_ids(false)
-        .with_thread_names(false)
-        .with_line_number(false)
-        .with_file(false)
-        .compact()
-        .with_filter(file_filter);
+    // Configure rolling file appender (daily rotation, keep 14 files)
+    let (file_layer, guard) = if let Ok(appender) = RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("proton-beam")
+        .filename_suffix("log")
+        .max_log_files(14)
+        .build(output_dir)
+    {
+        let (writer, guard) = tracing_appender::non_blocking(appender);
+        let layer = fmt::layer()
+            .with_writer(writer)
+            .event_format(
+                fmt::format()
+                    .with_timer(fmt::time::SystemTime)
+                    .with_level(true)
+                    .with_target(false)
+                    .with_thread_ids(true)
+                    .with_thread_names(true),
+            )
+            .with_filter(file_filter);
+        (Some(layer), Some(guard))
+    } else {
+        (None, None)
+    };
 
-    // Initialize subscriber with only file layer (no stderr output)
-    tracing_subscriber::registry().with(file_layer).init();
+    if let Some(guard) = guard {
+        let _ = LOG_GUARD.set(guard);
+    }
+
+    let stderr_layer = || {
+        fmt::layer()
+            .with_writer(std::io::stderr)
+            .event_format(
+                fmt::format()
+                    .with_timer(fmt::time::SystemTime)
+                    .with_target(false)
+                    .with_thread_ids(false)
+                    .with_thread_names(false)
+                    .compact(),
+            )
+            .with_filter(LevelFilter::WARN)
+    };
+
+    // It's possible init_logging is called multiple times; ignore if already set
+    match file_layer {
+        Some(layer) => {
+            let _ = tracing_subscriber::registry()
+                .with(stderr_layer())
+                .with(layer)
+                .try_init();
+        }
+        None => {
+            let _ = tracing_subscriber::registry()
+                .with(stderr_layer())
+                .try_init();
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -471,7 +605,11 @@ fn convert_events(
         let event = match ProtoEvent::try_from(line.as_str()) {
             Ok(event) => event,
             Err(e) => {
-                storage.log_error((line_num + 1) as u64, &format!("parse_error: {}", e), None);
+                storage.log_error(
+                    LogErrorContext::from_line((line_num + 1) as u64),
+                    &format!("parse_error: {}", e),
+                    None,
+                );
                 stats.invalid_events += 1;
                 continue;
             }
@@ -480,7 +618,7 @@ fn convert_events(
         // Validate basic fields first (fast check)
         if let Err(e) = validate_basic_fields(&event) {
             storage.log_error(
-                (line_num + 1) as u64,
+                LogErrorContext::from_line((line_num + 1) as u64),
                 &format!("validation_error: {}", e),
                 Some(&event.id),
             );
@@ -494,7 +632,7 @@ fn convert_events(
                 Ok(h) => h,
                 Err(e) => {
                     storage.log_error(
-                        (line_num + 1) as u64,
+                        LogErrorContext::from_line((line_num + 1) as u64),
                         &format!("hash_error: {}", e),
                         Some(&event.id),
                     );
@@ -505,7 +643,7 @@ fn convert_events(
 
             if validate_event_ids && let Err(e) = validate_event_id_from_hash(&event, &hash) {
                 storage.log_error(
-                    (line_num + 1) as u64,
+                    LogErrorContext::from_line((line_num + 1) as u64),
                     &format!("validation_error: {}", e),
                     Some(&event.id),
                 );
@@ -515,7 +653,7 @@ fn convert_events(
 
             if validate_signatures && let Err(e) = validate_signature_from_hash(&event, &hash) {
                 storage.log_error(
-                    (line_num + 1) as u64,
+                    LogErrorContext::from_line((line_num + 1) as u64),
                     &format!("validation_error: {}", e),
                     Some(&event.id),
                 );
@@ -533,7 +671,7 @@ fn convert_events(
             Err(e) => {
                 error!("Failed to store event from line {}: {}", line_num + 1, e);
                 storage.log_error(
-                    (line_num + 1) as u64,
+                    LogErrorContext::from_line((line_num + 1) as u64),
                     &format!("storage_error: {}", e),
                     None,
                 );
@@ -563,6 +701,9 @@ fn convert_events(
         ));
     }
 
+    // Get error statistics from storage manager
+    let error_stats = storage.error_stats();
+
     info!("Conversion complete");
     if filtered_count > 0 {
         info!(
@@ -570,7 +711,7 @@ fn convert_events(
             filtered_count
         );
     }
-    stats.print_summary();
+    stats.print_summary(Some(error_stats));
 
     // Exit code: 0 if any events succeeded, 1 if all failed
     if stats.valid_events == 0 && stats.total_lines > 0 {
@@ -634,7 +775,9 @@ fn convert_events_parallel(
         None
     };
 
-    let parallel_errors: Arc<Mutex<Vec<anyhow::Error>>> = Arc::new(Mutex::new(Vec::new()));
+    // Track both errors and which chunks failed (for better reporting)
+    let parallel_errors: Arc<Mutex<Vec<(usize, anyhow::Error)>>> = Arc::new(Mutex::new(Vec::new()));
+    let error_stats_list: Arc<Mutex<Vec<ErrorStats>>> = Arc::new(Mutex::new(Vec::new()));
 
     rayon::scope(|scope| {
         for (thread_id, (start, end)) in chunks.into_iter().enumerate() {
@@ -647,9 +790,10 @@ fn convert_events_parallel(
             let bytes_processed = Arc::clone(&bytes_processed);
             let progress = progress.as_ref().map(Arc::clone);
             let errors = Arc::clone(&parallel_errors);
+            let error_stats_list = Arc::clone(&error_stats_list);
 
             scope.spawn(move |_| {
-                if let Err(e) = process_chunk(
+                match process_chunk(
                     thread_id,
                     &input,
                     start,
@@ -667,8 +811,17 @@ fn convert_events_parallel(
                     filter_invalid_kinds,
                     compression_level,
                 ) {
-                    error!("Thread {} error: {:?}", thread_id, e);
-                    errors.lock().unwrap().push(e);
+                    Ok(stats) => {
+                        // Collect error stats from this thread
+                        error_stats_list.lock().unwrap().push(stats);
+                    }
+                    Err(e) => {
+                        error!(
+                            "Thread {} (bytes {}-{}) error: {:?}",
+                            thread_id, start, end, e
+                        );
+                        errors.lock().unwrap().push((thread_id, e));
+                    }
                 }
             });
         }
@@ -679,9 +832,32 @@ fn convert_events_parallel(
         .into_inner()
         .unwrap();
     if !errors.is_empty() {
-        return Err(anyhow::anyhow!(
-            "Parallel processing encountered errors ({} threads)",
+        // Log all errors for debugging
+        eprintln!(
+            "\n⚠️  WARNING: {} thread(s) failed during parallel processing:",
             errors.len()
+        );
+        eprintln!("   Partial data from these threads has been saved to temp files.");
+        eprintln!("   However, events after the error point in each failed chunk are LOST.\n");
+
+        for (thread_id, e) in &errors {
+            error!("Thread {} failed: {:?}", thread_id, e);
+            eprintln!("   Thread {}: {}", thread_id, e);
+        }
+
+        eprintln!("\n📝 Recovery options:");
+        eprintln!(
+            "   1. Use 'proton-beam merge {}' to salvage successfully processed data",
+            output_dir.display()
+        );
+        eprintln!("      (Note: You will be missing data from the failed chunks)");
+        eprintln!("   2. Fix the underlying issue and re-run the full conversion");
+        eprintln!("      (Recommended for complete data integrity)\n");
+
+        return Err(anyhow::anyhow!(
+            "Parallel processing failed: {}/{} chunks encountered errors. See above for details.",
+            errors.len(),
+            num_threads
         ));
     }
 
@@ -693,12 +869,25 @@ fn convert_events_parallel(
     info!("All chunks processed, merging temporary files...");
 
     // Merge temporary files
-    merge_temp_files(output_dir, &temp_dir, compression_level)?;
+    if let Err(e) = merge_temp_files(output_dir, &temp_dir, compression_level) {
+        error!("Failed to merge temp files: {:?}", e);
+        return Err(e).context("Failed to merge temporary files");
+    }
 
     // Clean up temp directory
     std::fs::remove_dir_all(&temp_dir).context("Failed to remove temp directory")?;
 
     info!("Merge complete");
+
+    // Merge error statistics from all threads
+    let error_stats_list = Arc::try_unwrap(error_stats_list)
+        .unwrap()
+        .into_inner()
+        .unwrap();
+    let mut merged_error_stats = ErrorStats::new();
+    for stats in error_stats_list {
+        merged_error_stats.merge(&stats);
+    }
 
     // Print summary using atomic values
     let final_stats = ConversionStats {
@@ -707,7 +896,7 @@ fn convert_events_parallel(
         invalid_events: invalid_events.load(Ordering::Relaxed),
         skipped_lines: skipped_lines.load(Ordering::Relaxed),
     };
-    final_stats.print_summary();
+    final_stats.print_summary(Some(&merged_error_stats));
 
     // Exit code: 0 if any events succeeded, 1 if all failed
     if final_stats.valid_events == 0 && final_stats.total_lines > 0 {
@@ -768,6 +957,21 @@ fn find_chunk_boundaries(path: &Path, num_chunks: usize) -> Result<Vec<(u64, u64
 }
 
 /// Process a single chunk of the input file
+///
+/// # Error Handling
+///
+/// If this function returns an error:
+/// - Events processed BEFORE the error are saved to the temp file (via StorageManager::Drop)
+/// - Events after the error point in this chunk are LOST
+/// - Other threads continue processing their chunks
+/// - The overall parallel conversion will fail, but temp files are preserved for recovery
+///
+/// Common failure scenarios:
+/// - I/O errors reading from input file (disk issues, NFS timeouts)
+/// - Corrupted/malformed JSON that crashes the parser
+/// - Disk full while writing temp file
+///
+/// Returns the error statistics collected during processing.
 #[allow(clippy::too_many_arguments)]
 fn process_chunk(
     thread_id: usize,
@@ -786,7 +990,7 @@ fn process_chunk(
     batch_size: usize,
     filter_invalid_kinds: bool,
     compression_level: u32,
-) -> Result<()> {
+) -> Result<ErrorStats> {
     // Open the file and seek to start position
     let file = File::open(input_path)?;
     let mut reader = BufReader::new(file);
@@ -853,7 +1057,13 @@ fn process_chunk(
         let event = match ProtoEvent::try_from(line.as_str()) {
             Ok(event) => event,
             Err(e) => {
-                storage.log_error(line_num, &format!("parse_error: {}", e), None);
+                storage.log_error(
+                    LogErrorContext::new(line_num, thread_id)
+                        .with_chunk_offset(start)
+                        .with_bytes_read(position - start),
+                    &format!("parse_error: {}", e),
+                    None,
+                );
                 local_invalid += 1;
                 invalid_events.fetch_add(1, Ordering::Relaxed);
                 continue;
@@ -863,7 +1073,9 @@ fn process_chunk(
         // Validate basic fields first (fast check)
         if let Err(e) = validate_basic_fields(&event) {
             storage.log_error(
-                line_num,
+                LogErrorContext::new(line_num, thread_id)
+                    .with_chunk_offset(start)
+                    .with_bytes_read(position - start),
                 &format!("validation_error: {}", e),
                 Some(&event.id),
             );
@@ -877,7 +1089,13 @@ fn process_chunk(
             let hash = match compute_event_hash(&event) {
                 Ok(h) => h,
                 Err(e) => {
-                    storage.log_error(line_num, &format!("hash_error: {}", e), Some(&event.id));
+                    storage.log_error(
+                        LogErrorContext::new(line_num, thread_id)
+                            .with_chunk_offset(start)
+                            .with_bytes_read(position - start),
+                        &format!("hash_error: {}", e),
+                        Some(&event.id),
+                    );
                     local_invalid += 1;
                     invalid_events.fetch_add(1, Ordering::Relaxed);
                     continue;
@@ -886,7 +1104,9 @@ fn process_chunk(
 
             if validate_event_ids && let Err(e) = validate_event_id_from_hash(&event, &hash) {
                 storage.log_error(
-                    line_num,
+                    LogErrorContext::new(line_num, thread_id)
+                        .with_chunk_offset(start)
+                        .with_bytes_read(position - start),
                     &format!("validation_error: {}", e),
                     Some(&event.id),
                 );
@@ -897,7 +1117,9 @@ fn process_chunk(
 
             if validate_signatures && let Err(e) = validate_signature_from_hash(&event, &hash) {
                 storage.log_error(
-                    line_num,
+                    LogErrorContext::new(line_num, thread_id)
+                        .with_chunk_offset(start)
+                        .with_bytes_read(position - start),
                     &format!("validation_error: {}", e),
                     Some(&event.id),
                 );
@@ -918,7 +1140,13 @@ fn process_chunk(
                     "Thread {}: Failed to store event from line {}: {}",
                     thread_id, line_num, e
                 );
-                storage.log_error(line_num, &format!("storage_error: {}", e), None);
+                storage.log_error(
+                    LogErrorContext::new(line_num, thread_id)
+                        .with_chunk_offset(start)
+                        .with_bytes_read(position - start),
+                    &format!("storage_error: {}", e),
+                    None,
+                );
                 local_invalid += 1;
                 invalid_events.fetch_add(1, Ordering::Relaxed);
             }
@@ -941,7 +1169,8 @@ fn process_chunk(
         }
     );
 
-    Ok(())
+    // Return error statistics from this thread
+    Ok(storage.clone_error_stats())
 }
 
 /// Merge temporary files into final date-organized files
@@ -949,20 +1178,71 @@ fn merge_temp_files(output_dir: &Path, temp_dir: &Path, compression_level: u32) 
     // Group temp files by date
     let mut files_by_date: HashMap<String, Vec<PathBuf>> = HashMap::new();
 
-    for entry in std::fs::read_dir(temp_dir)? {
-        let path = entry?.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("tmp")
-            && let Some(date) = extract_date_from_temp_filename(&path)
-        {
-            files_by_date.entry(date).or_default().push(path);
+    // List all files in temp directory for debugging
+    let temp_files: Vec<PathBuf> = std::fs::read_dir(temp_dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .collect();
+
+    info!("Found {} files in temp directory", temp_files.len());
+
+    for path in temp_files {
+        if path.extension().and_then(|s| s.to_str()) == Some("tmp") {
+            match extract_date_from_temp_filename(&path) {
+                Some(date) => {
+                    debug!("Grouping temp file: {} -> date: {}", path.display(), date);
+                    files_by_date.entry(date).or_default().push(path);
+                }
+                None => {
+                    error!(
+                        "Failed to extract date from temp filename: {}",
+                        path.display()
+                    );
+                }
+            }
+        } else {
+            debug!("Skipping non-tmp file: {}", path.display());
         }
+    }
+
+    if files_by_date.is_empty() {
+        info!("No temp files to merge (no events were processed)");
+        println!("⚠️  No temp files found - no events were processed");
+        return Ok(());
     }
 
     info!("Merging {} dates...", files_by_date.len());
 
     // Merge each date's files
     for (date, temp_files) in files_by_date {
-        merge_protobuf_files_with_dedup(&temp_files, output_dir, &date, compression_level)?;
+        info!("Merging {} files for date: {}", temp_files.len(), date);
+        println!(
+            "📦 Merging {} temp files for date: {}",
+            temp_files.len(),
+            date
+        );
+
+        match merge_protobuf_files_with_dedup(&temp_files, output_dir, &date, compression_level) {
+            Ok(stats) => {
+                info!(
+                    "Merge summary for {}: {} events, {} duplicates, {} corrupted skipped",
+                    date, stats.written_events, stats.duplicates, stats.corrupted
+                );
+                println!(
+                    "   ✅ {} (events: {}, dupes: {}, corrupt: {})",
+                    date, stats.written_events, stats.duplicates, stats.corrupted
+                );
+            }
+            Err(e) => {
+                error!("Failed to merge files for date {}: {:?}", date, e);
+                println!(
+                    "   ❌ Failed to merge {} (see log for details: {})",
+                    date,
+                    output_dir.join("proton-beam.log").display()
+                );
+                continue;
+            }
+        }
     }
 
     Ok(())
@@ -993,12 +1273,18 @@ fn extract_date_from_temp_filename(path: &Path) -> Option<String> {
 }
 
 /// Merge multiple protobuf files with deduplication
+struct MergeStats {
+    written_events: u64,
+    duplicates: u64,
+    corrupted: u64,
+}
+
 fn merge_protobuf_files_with_dedup(
     sources: &[PathBuf],
     output_dir: &Path,
     date_str: &str,
     compression_level: u32,
-) -> Result<()> {
+) -> Result<MergeStats> {
     use proton_beam_core::{
         create_gzip_decoder, create_gzip_encoder_with_level, read_events_delimited,
         write_event_delimited,
@@ -1008,56 +1294,132 @@ fn merge_protobuf_files_with_dedup(
     let final_file = output_dir.join(format!("{}.pb.gz", date_str));
     let temp_output = output_dir.join(format!("{}.pb.gz.tmp", date_str));
 
+    debug!(
+        "Merging {} source files into {}",
+        sources.len(),
+        final_file.display()
+    );
+
     // If final file already exists, we need to include it in the merge
     let mut all_sources = sources.to_vec();
     if final_file.exists() {
+        debug!(
+            "Including existing final file in merge: {}",
+            final_file.display()
+        );
         all_sources.push(final_file.clone());
     }
 
-    let output_file = File::create(&temp_output)?;
+    let output_file = File::create(&temp_output).context(format!(
+        "Failed to create temp output file: {}",
+        temp_output.display()
+    ))?;
     let gz = create_gzip_encoder_with_level(output_file, compression_level);
     let mut writer = BufWriter::new(gz);
 
     // Deduplicate during merge (streaming)
     let mut seen_ids = HashSet::new();
-    let mut event_count = 0;
-    let mut duplicate_count = 0;
+    let mut event_count = 0u64;
+    let mut duplicate_count = 0u64;
+    let mut corrupted_events = 0u64;
+    let mut source_errors = 0u64;
 
-    for source in &all_sources {
-        let file = File::open(source)?;
+    for (idx, source) in all_sources.iter().enumerate() {
+        debug!(
+            "Processing source file {}/{}: {}",
+            idx + 1,
+            all_sources.len(),
+            source.display()
+        );
+
+        let file = match File::open(source) {
+            Ok(f) => f,
+            Err(e) => {
+                source_errors += 1;
+                error!(
+                    "Failed to open source {} (skipping): {}",
+                    source.display(),
+                    e
+                );
+                continue;
+            }
+        };
         let gz = create_gzip_decoder(file);
-        for event in read_events_delimited(gz) {
-            let event = event?;
+
+        let mut source_events = 0;
+        for (event_idx, event_result) in read_events_delimited(gz).enumerate() {
+            // IMPROVED: Handle corrupted events gracefully - continue merge instead of failing
+            let event = match event_result {
+                Ok(e) => e,
+                Err(e) => {
+                    corrupted_events += 1;
+                    error!(
+                        "Corrupted event {} in {} (skipping): {}",
+                        event_idx + 1,
+                        source.display(),
+                        e
+                    );
+                    continue;
+                }
+            };
+
             if !seen_ids.insert(event.id.clone()) {
                 duplicate_count += 1;
                 continue;
             }
 
-            write_event_delimited(&mut writer, &event)?;
+            write_event_delimited(&mut writer, &event).context(format!(
+                "Failed to write event {} to output file: {}",
+                event_count + 1,
+                temp_output.display()
+            ))?;
             event_count += 1;
+            source_events += 1;
         }
+        debug!(
+            "Processed {} events from {}",
+            source_events,
+            source.display()
+        );
     }
 
-    writer.flush()?;
+    writer.flush().context("Failed to flush writer")?;
     drop(writer);
-    std::fs::rename(&temp_output, &final_file)?;
 
-    if duplicate_count > 0 {
-        debug!(
-            "Merged {} with {} events ({} duplicates removed)",
-            final_file.display(),
-            event_count,
-            duplicate_count
+    debug!(
+        "Renaming {} to {}",
+        temp_output.display(),
+        final_file.display()
+    );
+    std::fs::rename(&temp_output, &final_file).context(format!(
+        "Failed to rename {} to {}",
+        temp_output.display(),
+        final_file.display()
+    ))?;
+
+    // Log merge summary with all relevant stats
+    if corrupted_events > 0 {
+        println!(
+            "⚠️  Warning: Skipped {} corrupted events during merge",
+            corrupted_events
         );
-    } else {
-        debug!(
-            "Merged {} with {} events",
-            final_file.display(),
-            event_count
+    }
+    if source_errors > 0 {
+        warn!(
+            "{} source files could not be opened and were skipped",
+            source_errors
+        );
+        println!(
+            "⚠️  Warning: {} source files failed to open and were skipped",
+            source_errors
         );
     }
 
-    Ok(())
+    Ok(MergeStats {
+        written_events: event_count,
+        duplicates: duplicate_count,
+        corrupted: corrupted_events,
+    })
 }
 
 /// Rebuild the event index from existing protobuf files
@@ -1079,7 +1441,9 @@ fn rebuild_index(pb_dir: &Path, index_path: &Path) -> Result<()> {
         info!("Removed existing index");
     }
 
-    let mut index = EventIndex::new(index_path).context("Failed to create event index")?;
+    // Use bulk mode for significantly faster initial index building
+    let mut index = EventIndex::new_bulk_mode(index_path).context("Failed to create event index")?;
+    info!("Using bulk insert mode with optimized SQLite settings");
 
     // Find all .pb.gz files in the directory
     let mut pb_files: Vec<PathBuf> = Vec::new();
@@ -1143,8 +1507,19 @@ fn rebuild_index(pb_dir: &Path, index_path: &Path) -> Result<()> {
         let mut file_events = 0;
         let mut batch: Vec<(ProtoEvent, &str)> = Vec::with_capacity(INDEX_BATCH_SIZE);
 
-        for event_result in read_events_delimited(gz) {
-            let event = event_result.context(format!("Failed to read event from {}", file_name))?;
+        for (event_idx, event_result) in read_events_delimited(gz).enumerate() {
+            let event = match event_result {
+                Ok(ev) => ev,
+                Err(e) => {
+                    warn!(
+                        "Corrupted event {} in {} during indexing: {}",
+                        event_idx + 1,
+                        file_name,
+                        e
+                    );
+                    continue;
+                }
+            };
             batch.push((event, file_name));
             file_events += 1;
 
@@ -1185,6 +1560,11 @@ fn rebuild_index(pb_dir: &Path, index_path: &Path) -> Result<()> {
 
     let elapsed = start_time.elapsed();
     let events_per_sec = total_events as f64 / elapsed.as_secs_f64();
+
+    // Finalize bulk mode (re-enable safety, run ANALYZE)
+    info!("Finalizing index (running ANALYZE for query optimization)...");
+    println!("\n🔧 Finalizing index...");
+    index.finalize_bulk_mode()?;
 
     println!("\n✅ Index Rebuild Complete");
     println!("  Indexed events:      {}", total_events);

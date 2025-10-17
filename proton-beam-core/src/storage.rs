@@ -2,7 +2,7 @@
 
 use crate::{ProtoEvent, error::Result};
 use flate2::Compression;
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
 use prost::Message;
 use std::io::{Read, Write};
@@ -170,8 +170,8 @@ pub fn create_gzip_encoder<W: Write>(writer: W) -> GzEncoder<W> {
 /// }
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn create_gzip_decoder<R: Read>(reader: R) -> GzDecoder<R> {
-    GzDecoder::new(reader)
+pub fn create_gzip_decoder<R: Read>(reader: R) -> MultiGzDecoder<R> {
+    MultiGzDecoder::new(reader)
 }
 
 pub fn create_gzip_encoder_with_level<W: Write>(writer: W, level: u32) -> GzEncoder<W> {

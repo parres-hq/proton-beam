@@ -3,10 +3,7 @@ use std::path::Path;
 use tracing::{info, warn};
 
 #[cfg(feature = "s3")]
-use aws_sdk_s3::{
-    primitives::ByteStream,
-    Client,
-};
+use aws_sdk_s3::{Client, primitives::ByteStream};
 
 /// S3 uploader for protobuf files and index
 pub struct S3Uploader {
@@ -20,10 +17,15 @@ impl S3Uploader {
     /// Create a new S3 uploader
     #[cfg(feature = "s3")]
     pub async fn new(bucket: String, prefix: String) -> Result<Self> {
-        let config = aws_config::defaults(aws_config::BehaviorVersion::latest()).load().await;
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .load()
+            .await;
         let client = Client::new(&config);
 
-        info!("S3 uploader initialized for bucket: {} with prefix: {}", bucket, prefix);
+        info!(
+            "S3 uploader initialized for bucket: {} with prefix: {}",
+            bucket, prefix
+        );
 
         Ok(Self {
             client,
@@ -46,7 +48,12 @@ impl S3Uploader {
             format!("{}/{}", self.prefix.trim_end_matches('/'), s3_key)
         };
 
-        info!("Uploading {} to s3://{}/{}", local_path.display(), self.bucket, full_key);
+        info!(
+            "Uploading {} to s3://{}/{}",
+            local_path.display(),
+            self.bucket,
+            full_key
+        );
 
         let body = ByteStream::from_path(local_path)
             .await
@@ -59,7 +66,10 @@ impl S3Uploader {
             .body(body)
             .send()
             .await
-            .context(format!("Failed to upload to s3://{}/{}", self.bucket, full_key))?;
+            .context(format!(
+                "Failed to upload to s3://{}/{}",
+                self.bucket, full_key
+            ))?;
 
         info!("Successfully uploaded to s3://{}/{}", self.bucket, full_key);
         Ok(())
@@ -147,7 +157,10 @@ impl S3Uploader {
         let log_path = output_dir.join("proton-beam.log");
         self.upload_log(&log_path).await?;
 
-        info!("Upload complete: {} protobuf files + index + log", pb_files.len());
+        info!(
+            "Upload complete: {} protobuf files + index + log",
+            pb_files.len()
+        );
         Ok(())
     }
 }
@@ -204,4 +217,3 @@ mod tests {
         assert!(parse_s3_uri("s3://").is_err());
     }
 }
-

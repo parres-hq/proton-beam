@@ -12,7 +12,9 @@ Proton Beam is a highly experimental (and will eventually be a high-performance)
 - 🚀 **High Performance**: Process 100+ events/second with validated signatures
 - 🔒 **Full Validation**: Verify event IDs (SHA-256) and Schnorr signatures
 - 📦 **Efficient Storage**: Protobuf + gzip compression (~3x smaller than JSON, 65%+ space savings)
-- 🗄️ **SQLite Index**: Fast event lookups and deduplication (~307K lookups/sec)
+- 🗄️ **Optimized SQLite Index**: Fast event lookups and deduplication (~307K lookups/sec)
+  - Bulk insert mode: 2-3x faster for large-scale index rebuilds (500K+ events/sec)
+  - Optimized PRAGMAs for multi-billion event datasets
 - 🔄 **Real-time Processing**: Connect to multiple Nostr relays simultaneously
 - 🎯 **Smart Deduplication**: Events stored once across all relay sources
 - 🔍 **Advanced Filtering**: Filter by event kind, author, or tags
@@ -21,6 +23,7 @@ Proton Beam is a highly experimental (and will eventually be a high-performance)
 - 📊 **Progress Tracking**: Beautiful progress bars for batch operations
 - 🔀 **Parallel Processing**: Multi-threaded conversion for maximum throughput
 - ☁️ **AWS S3 Support**: Direct upload to S3 buckets (optional feature)
+- 💾 **Scalable**: Tested with 1TB+ datasets on commodity hardware
 
 ## Quick Start
 
@@ -81,10 +84,26 @@ Parallel processing with multiple threads:
 proton-beam convert events.jsonl --parallel 8
 ```
 
+Recover from a failed parallel conversion (merge existing temp files):
+
+```bash
+proton-beam merge ./pb_data --cleanup
+```
+
 Adjust compression level:
 
 ```bash
 proton-beam convert events.jsonl --compression-level 9
+```
+
+Rebuild the event index from protobuf files:
+
+```bash
+# Rebuild index with optimized bulk insert mode (2-3x faster)
+proton-beam index rebuild ./pb_data
+
+# Custom index location
+proton-beam index rebuild ./pb_data --index-path ./custom/index.db
 ```
 
 Upload to S3 after conversion (requires `--features s3`):

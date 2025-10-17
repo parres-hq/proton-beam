@@ -104,10 +104,130 @@ impl EventIndex {
             Error::InvalidEvent(format!("Failed to open database at {:?}: {}", db_path, e))
         })?;
 
+        // Apply standard performance settings
+        Self::configure_connection(&conn)?;
+
         // Create schema if needed
         Self::create_schema(&conn)?;
 
         Ok(Self { conn })
+    }
+
+    /// Create or open an event index with bulk insert optimizations
+    ///
+    /// This mode is optimized for building a new index from scratch.
+    /// It disables safety features that slow down bulk inserts.
+    ///
+    /// **WARNING:** Use this only for initial index building, not for normal operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `db_path` - Path to the SQLite database file
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use proton_beam_core::EventIndex;
+    /// use std::path::Path;
+    ///
+    /// let mut index = EventIndex::new_bulk_mode(Path::new("./pb_data/index.db"))?;
+    /// // ... insert millions of events ...
+    /// index.finalize_bulk_mode()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn new_bulk_mode(db_path: &Path) -> Result<Self> {
+        let conn = Connection::open(db_path).map_err(|e| {
+            Error::InvalidEvent(format!("Failed to open database at {:?}: {}", db_path, e))
+        })?;
+
+        // Apply aggressive bulk insert settings
+        Self::configure_bulk_mode(&conn)?;
+
+        // Create schema if needed
+        Self::create_schema(&conn)?;
+
+        Ok(Self { conn })
+    }
+
+    /// Configure standard connection settings for normal operations
+    fn configure_connection(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            r#"
+            -- Use Write-Ahead Logging for better concurrency
+            PRAGMA journal_mode = WAL;
+
+            -- Reasonable safety vs speed tradeoff
+            PRAGMA synchronous = NORMAL;
+
+            -- 200MB cache (negative = KB, positive = pages)
+            PRAGMA cache_size = -204800;
+
+            -- Store temp tables and indices in memory
+            PRAGMA temp_store = MEMORY;
+
+            -- Enable memory-mapped I/O (helps with large reads)
+            PRAGMA mmap_size = 268435456;  -- 256MB
+            "#,
+        )
+        .map_err(|e| Error::InvalidEvent(format!("Failed to configure connection: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Configure aggressive settings for bulk inserts
+    fn configure_bulk_mode(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            r#"
+            -- Use Write-Ahead Logging
+            PRAGMA journal_mode = WAL;
+
+            -- Minimal durability - rely on OS to flush to disk
+            -- This is safe for bulk rebuilds since we can restart if it fails
+            PRAGMA synchronous = OFF;
+
+            -- Large cache: 2GB (system has 256GB RAM)
+            PRAGMA cache_size = -2097152;
+
+            -- Store temp tables in memory
+            PRAGMA temp_store = MEMORY;
+
+            -- Larger page size for sequential writes
+            PRAGMA page_size = 32768;
+
+            -- Enable memory-mapped I/O: 2GB
+            PRAGMA mmap_size = 2147483648;
+
+            -- Disable auto-vacuum during bulk insert (we'll vacuum at the end)
+            PRAGMA auto_vacuum = NONE;
+
+            -- Larger temp cache
+            PRAGMA temp_cache_size = -524288;  -- 512MB
+            "#,
+        )
+        .map_err(|e| Error::InvalidEvent(format!("Failed to configure bulk mode: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Finalize bulk mode by re-enabling safety features and optimizing the database
+    pub fn finalize_bulk_mode(&mut self) -> Result<()> {
+        self.conn
+            .execute_batch(
+                r#"
+                -- Re-enable safe synchronous mode
+                PRAGMA synchronous = NORMAL;
+
+                -- Analyze tables for query optimizer
+                ANALYZE;
+
+                -- Optional: Vacuum to reclaim space and optimize layout
+                -- (This can be slow on huge DBs, so it's commented out)
+                -- VACUUM;
+                "#,
+            )
+            .map_err(|e| Error::InvalidEvent(format!("Failed to finalize bulk mode: {}", e)))?;
+
+        Ok(())
     }
 
     /// Create the database schema
