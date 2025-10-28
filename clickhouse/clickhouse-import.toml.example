@@ -1,0 +1,47 @@
+# ClickHouse Import Configuration Template
+# Copy this file to clickhouse-import.toml and customize for your setup
+
+[clickhouse]
+# ClickHouse connection settings
+host = "localhost"
+port = 8123
+user = "default"
+password = ""
+database = "nostr"
+table = "events_local"
+
+[import]
+# Import settings
+batch_size = 5000  # Events per batch insert
+skip_test = false  # Skip connection test at startup
+dry_run = false    # Parse files but don't insert
+
+[logging]
+verbose = false  # Enable verbose logging
+
+# Example configurations for different scenarios:
+
+# Local Development
+# [clickhouse]
+# host = "localhost"
+# port = 8123
+# user = "default"
+# password = ""
+
+# Production Server
+# [clickhouse]
+# host = "clickhouse.example.com"
+# port = 8123
+# user = "nostr_importer"
+# password = "your_secure_password"
+
+# High-Performance Import
+# [import]
+# batch_size = 10000
+
+# Memory-Constrained Environment
+# [import]
+# batch_size = 2000
+
+
+
