@@ -1,7 +1,7 @@
 # Protobuf Schema Documentation
 
 **Version:** 1.0
-**Last Updated:** 2025-10-13
+**Last Updated:** 2025-10-29
 
 ## Overview
 
@@ -17,7 +17,8 @@ syntax = "proto3";
 package nostr;
 
 // Main Nostr event message
-message Event {
+// Named ProtoEvent to avoid naming conflicts with nostr-sdk::Event
+message ProtoEvent {
   // 32-byte lowercase hex-encoded SHA256 hash of the serialized event data
   string id = 1;
 
@@ -51,7 +52,7 @@ message Tag {
 // Batch message for convenience (testing, bulk operations)
 // Not used for primary storage
 message EventBatch {
-  repeated Event events = 1;
+  repeated ProtoEvent events = 1;
 }
 ```
 
@@ -207,35 +208,27 @@ Each `.pb` file contains multiple events in length-delimited format:
 ```
 
 **Varint length:** Uses protobuf variable-length integer encoding (1-10 bytes)
-**Event binary data:** Protobuf-encoded Event message
+**Event binary data:** Protobuf-encoded ProtoEvent message
 
 ### Reading Events
 
 ```rust
-use prost::Message;
-use std::io::Read;
+use proton_beam_core::read_events_delimited;
+use std::fs::File;
 
-fn read_events(file: &mut File) -> Result<Vec<Event>> {
-    let mut events = Vec::new();
-    let mut reader = std::io::BufReader::new(file);
+// Recommended: Use the provided iterator for memory-efficient streaming
+fn read_events(file: File) -> Result<Vec<ProtoEvent>> {
+    read_events_delimited(file)
+        .collect::<Result<Vec<_>>>()
+}
 
-    loop {
-        // Read varint length
-        let len = match read_varint(&mut reader) {
-            Ok(len) => len,
-            Err(_) => break, // EOF
-        };
-
-        // Read message bytes
-        let mut buf = vec![0u8; len];
-        reader.read_exact(&mut buf)?;
-
-        // Decode event
-        let event = Event::decode(&buf[..])?;
-        events.push(event);
+// Or process one at a time without loading all into memory:
+fn process_events(file: File) -> Result<()> {
+    for result in read_events_delimited(file) {
+        let event = result?;
+        // Process event here...
     }
-
-    Ok(events)
+    Ok(())
 }
 ```
 
@@ -318,7 +311,7 @@ Uses secp256k1 curve with BIP340 Schnorr signatures.
 Possible future fields (will not break existing code):
 
 ```protobuf
-message Event {
+message ProtoEvent {
   // Existing fields 1-7...
 
   // Future additions
@@ -378,7 +371,7 @@ message Event {
 
 ```bash
 # Use protoc to decode (requires descriptor file)
-protoc --decode=nostr.Event nostr.proto < event.pb
+protoc --decode=nostr.ProtoEvent nostr.proto < event.pb
 
 # Use hexdump to see raw bytes
 hexdump -C events.pb | head
@@ -409,5 +402,5 @@ println!("{}", json);
 
 **Document Status:** Complete
 **Schema Version:** 1.0
-**Last Modified:** 2025-10-13
+**Last Modified:** 2025-10-29
 

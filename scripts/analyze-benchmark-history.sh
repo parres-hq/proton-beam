@@ -21,7 +21,7 @@ if [ ! -d "$BENCH_DIR" ]; then
 fi
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║          Benchmark History Analysis for Proton Beam           ║${NC}"
+echo -e "${BLUE}║          Benchmark History Analysis for Proton Beam CLI        ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 

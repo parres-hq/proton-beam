@@ -13,7 +13,7 @@ Core library for converting Nostr events between JSON and Protocol Buffer format
 - **FromIterator**: Ergonomic batch creation from iterators
 - **PartialEq/Eq**: Easy testing and comparisons
 - **Type-Safe**: Strongly-typed protobuf schema for Nostr events
-- **Well-Tested**: 62 tests with comprehensive coverage
+- **Well-Tested**: 103 tests with comprehensive coverage
 
 ## Installation
 
@@ -312,10 +312,9 @@ MIT
 
 ## See Also
 
-- [Project Plan](../docs/PROJECT_PLAN.md)
 - [Protobuf Schema Documentation](../docs/PROTOBUF_SCHEMA.md)
 - [Architecture Overview](../docs/ARCHITECTURE.md)
-- [Improvements Log](../IMPROVEMENTS_LOG.md)
+- [Project Status](../docs/PROJECT_STATUS.md)
 - [Nostr Protocol (NIP-01)](https://github.com/nostr-protocol/nips/blob/master/01.md)
 - [Protocol Buffers](https://protobuf.dev/)
 - [nostr-sdk](https://docs.rs/nostr-sdk/)
